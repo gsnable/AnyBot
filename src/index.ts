@@ -2,6 +2,10 @@ import "dotenv/config";
 
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { spawn } from "node:child_process";
+import { createReadStream, existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { buildSystemPrompt } from "./prompt.js";
 
@@ -14,6 +18,22 @@ type ChatTurn = {
 
 type TextMessageContent = {
   text?: string;
+};
+
+type ImageMessageContent = {
+  image_key?: string;
+};
+
+type IncomingMessage = {
+  message_id: string;
+  chat_id: string;
+  message_type: string;
+  content: string;
+};
+
+type ReplyPayload = {
+  text: string;
+  imagePaths: string[];
 };
 
 const sandboxModes = [
@@ -101,6 +121,111 @@ function sanitizeUserText(text: string): string {
   return text.replace(/<at[^>]*>.*?<\/at>/g, "").trim();
 }
 
+function parseIncomingImageKey(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content) as ImageMessageContent;
+    return parsed.image_key?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function getImageExtension(contentType?: string): string {
+  switch ((contentType || "").split(";")[0].trim().toLowerCase()) {
+    case "image/jpeg":
+      return ".jpg";
+    case "image/png":
+      return ".png";
+    case "image/webp":
+      return ".webp";
+    case "image/gif":
+      return ".gif";
+    case "image/tiff":
+      return ".tiff";
+    case "image/bmp":
+      return ".bmp";
+    case "image/x-icon":
+    case "image/vnd.microsoft.icon":
+      return ".ico";
+    default:
+      return ".img";
+  }
+}
+
+function isSupportedImagePath(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase();
+  return [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".tiff",
+    ".tif",
+    ".bmp",
+    ".ico",
+  ].includes(ext);
+}
+
+function normalizeCandidateImagePath(filePath: string): string | null {
+  const normalized = filePath.trim();
+  if (!normalized || !isSupportedImagePath(normalized)) {
+    return null;
+  }
+
+  const resolved = path.isAbsolute(normalized)
+    ? normalized
+    : path.resolve(codexWorkdir, normalized);
+
+  return existsSync(resolved) ? resolved : null;
+}
+
+function parseReplyPayload(reply: string): ReplyPayload {
+  const imagePaths = new Set<string>();
+
+  const markdownImagePattern = /!\[[^\]]*]\(([^)\n]+)\)/g;
+  for (const match of reply.matchAll(markdownImagePattern)) {
+    const imagePath = normalizeCandidateImagePath(match[1] || "");
+    if (imagePath) {
+      imagePaths.add(imagePath);
+    }
+  }
+
+  const plainPathPattern =
+    /(^|\n)(\.{0,2}\/?[^\s<>"')\]]+\.(?:png|jpe?g|webp|gif|tiff?|bmp|ico))(?=\n|$)/gi;
+  for (const match of reply.matchAll(plainPathPattern)) {
+    const imagePath = normalizeCandidateImagePath(match[2] || "");
+    if (imagePath) {
+      imagePaths.add(imagePath);
+    }
+  }
+
+  const inlineCodePathPattern = /`([^`\n]+\.(?:png|jpe?g|webp|gif|tiff?|bmp|ico))`/gi;
+  for (const match of reply.matchAll(inlineCodePathPattern)) {
+    const imagePath = normalizeCandidateImagePath(match[1] || "");
+    if (imagePath) {
+      imagePaths.add(imagePath);
+    }
+  }
+
+  let text = reply.replace(markdownImagePattern, (fullMatch, imagePath: string) => {
+    return normalizeCandidateImagePath(imagePath) ? "" : fullMatch;
+  });
+  text = text.replace(plainPathPattern, (fullMatch, prefix: string, imagePath: string) => {
+    return normalizeCandidateImagePath(imagePath) ? prefix : fullMatch;
+  });
+  text = text.replace(inlineCodePathPattern, (fullMatch, imagePath: string) => {
+    return normalizeCandidateImagePath(imagePath) ? "" : fullMatch;
+  });
+  text = text.trim();
+  text = text.replace(/\n{3,}/g, "\n\n");
+
+  return {
+    text,
+    imagePaths: [...imagePaths],
+  };
+}
+
 function trimHistory(turns: ChatTurn[]): ChatTurn[] {
   return turns.slice(-MAX_HISTORY_TURNS);
 }
@@ -121,10 +246,15 @@ function shouldReplyInGroup(
   return mentions.length > 0;
 }
 
-async function generateReply(chatId: string, userText: string): Promise<string> {
+async function generateReply(
+  chatId: string,
+  userText: string,
+  imagePaths: string[] = [],
+  historyText = userText,
+): Promise<string> {
   const history = historyByChat.get(chatId) || [];
   const systemPrompt = getSystemPrompt();
-  const transcript = [...history, { role: "user" as const, content: userText }]
+  const transcript = [...history, { role: "user" as const, content: historyText }]
     .map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`)
     .join("\n\n");
   const prompt = `${systemPrompt}
@@ -132,16 +262,17 @@ async function generateReply(chatId: string, userText: string): Promise<string> 
 Conversation so far:
 ${transcript}
 
-Reply to the latest USER message only.`;
+Reply to the latest USER message only.
+When you create or reference an image that should be sent back to the user in Feishu, include the image file path in your final reply. Prefer an absolute path or Markdown image syntax like ![label](/absolute/path.png). Relative paths are resolved from the working directory.`;
 
-  const outputText = await runCodex(prompt);
+  const outputText = await runCodex(prompt, imagePaths);
   if (!outputText) {
     throw new Error("Codex 返回了空内容");
   }
 
   const nextHistory = trimHistory([
     ...history,
-    { role: "user", content: userText },
+    { role: "user", content: historyText },
     { role: "assistant", content: outputText },
   ]);
   historyByChat.set(chatId, nextHistory);
@@ -149,7 +280,7 @@ Reply to the latest USER message only.`;
   return outputText;
 }
 
-async function runCodex(prompt: string): Promise<string> {
+async function runCodex(prompt: string, imagePaths: string[] = []): Promise<string> {
   const args = [
     "exec",
     "--json",
@@ -162,6 +293,10 @@ async function runCodex(prompt: string): Promise<string> {
 
   if (codexModel) {
     args.push("-m", codexModel);
+  }
+
+  for (const imagePath of imagePaths) {
+    args.push("-i", imagePath);
   }
 
   args.push(prompt);
@@ -241,6 +376,49 @@ async function sendText(chatId: string, text: string): Promise<void> {
   });
 }
 
+async function sendImage(chatId: string, imagePath: string): Promise<void> {
+  const upload = await larkClient.im.image.create({
+    data: {
+      image_type: "message",
+      image: createReadStream(imagePath),
+    },
+  });
+
+  const imageKey = upload?.image_key;
+  if (!imageKey) {
+    throw new Error(`上传图片失败：${imagePath}`);
+  }
+
+  await larkClient.im.message.create({
+    params: {
+      receive_id_type: "chat_id",
+    },
+    data: {
+      receive_id: chatId,
+      msg_type: "image",
+      content: JSON.stringify({ image_key: imageKey }),
+    },
+  });
+}
+
+async function sendReply(chatId: string, reply: string): Promise<void> {
+  const payload = parseReplyPayload(reply);
+
+  if (payload.text) {
+    await sendText(chatId, payload.text);
+  } else if (payload.imagePaths.length > 0) {
+    await sendText(chatId, "图片已发送。");
+  }
+
+  for (const imagePath of payload.imagePaths) {
+    await sendImage(chatId, imagePath);
+  }
+
+  if (!payload.text && payload.imagePaths.length === 0) {
+    await sendText(chatId, reply);
+  }
+}
+
 async function sendAckReaction(messageId: string): Promise<void> {
   if (!ackReaction) {
     return;
@@ -258,11 +436,35 @@ async function sendAckReaction(messageId: string): Promise<void> {
   });
 }
 
-async function processMessage(message: {
-  message_id: string;
-  chat_id: string;
-  content: string;
-}): Promise<void> {
+async function downloadImageFromMessage(message: IncomingMessage): Promise<string> {
+  const imageKey = parseIncomingImageKey(message.content);
+  if (!imageKey) {
+    throw new Error(`无法解析图片消息内容：${message.content}`);
+  }
+
+  const response = await larkClient.im.messageResource.get({
+    path: {
+      message_id: message.message_id,
+      file_key: imageKey,
+    },
+    params: {
+      type: "image",
+    },
+  });
+
+  const tempDir = await mkdtemp(path.join(tmpdir(), "codex-feishu-image-"));
+  const contentType =
+    response.headers?.["content-type"] || response.headers?.["Content-Type"];
+  const filePath = path.join(
+    tempDir,
+    `incoming${getImageExtension(Array.isArray(contentType) ? contentType[0] : contentType)}`,
+  );
+
+  await response.writeFile(filePath);
+  return filePath;
+}
+
+async function processTextMessage(message: IncomingMessage): Promise<void> {
   const rawText = parseIncomingText(message.content);
   const userText = sanitizeUserText(rawText);
 
@@ -279,10 +481,47 @@ async function processMessage(message: {
 
   try {
     const reply = await generateReply(message.chat_id, userText);
-    await sendText(message.chat_id, reply);
+    await sendReply(message.chat_id, reply);
   } catch (error) {
     console.error("处理消息失败", error);
     await sendText(message.chat_id, "处理消息时出错了，请稍后再试。");
+  }
+}
+
+async function processImageMessage(message: IncomingMessage): Promise<void> {
+  try {
+    await sendAckReaction(message.message_id);
+  } catch (error) {
+    console.error("发送已收到 reaction 失败", error);
+  }
+
+  let imagePath: string | null = null;
+
+  try {
+    imagePath = await downloadImageFromMessage(message);
+    const userText =
+      "用户发来了一张图片。请先根据图片内容直接回答；如果缺少上下文，就先简要描述图片里有什么，并询问对方希望你进一步做什么。";
+    const reply = await generateReply(
+      message.chat_id,
+      userText,
+      [imagePath],
+      "[用户发送了一张图片，请结合图片内容回答。]",
+    );
+    await sendReply(message.chat_id, reply);
+  } catch (error) {
+    console.error("处理图片消息失败", error);
+    await sendText(
+      message.chat_id,
+      "图片收到了，但处理失败。请确认机器人有读取图片资源的权限后再试。",
+    );
+  } finally {
+    if (imagePath) {
+      await rm(path.dirname(imagePath), { recursive: true, force: true }).catch(
+        (cleanupError) => {
+          console.error("清理临时图片失败", cleanupError);
+        },
+      );
+    }
   }
 }
 
@@ -312,8 +551,8 @@ async function handleMessage(event: {
   }
   handledMessageIds.add(message.message_id);
 
-  if (message.message_type !== "text") {
-    await sendText(message.chat_id, "目前只支持文本消息。");
+  if (message.message_type !== "text" && message.message_type !== "image") {
+    await sendText(message.chat_id, "目前只支持文本和图片消息。");
     return;
   }
 
@@ -326,7 +565,12 @@ async function handleMessage(event: {
     }
   }
 
-  void processMessage(message);
+  if (message.message_type === "image") {
+    void processImageMessage(message);
+    return;
+  }
+
+  void processTextMessage(message);
 }
 
 const dispatcher = new Lark.EventDispatcher({}).register({

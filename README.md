@@ -5,7 +5,7 @@
 ## 功能
 
 - 通过飞书长连接接收 `im.message.receive_v1` 事件
-- 把用户发来的文本转发给本地 `codex exec`
+- 把用户发来的文本或图片转发给本地 `codex exec`
 - 由机器人把结果回复回飞书
 - 按会话保存一小段内存中的上下文历史
 - 默认在私聊直接回复，在群聊里仅被 @ 时回复
@@ -45,6 +45,7 @@ npm run bot:stop --prefix /Users/erhu/code/python/CodexDesktopControl
 - 开启长连接模式的事件订阅
 - 订阅 `im.message.receive_v1`
 - 给机器人开通发送消息权限
+- 如果要处理用户发来的图片，还需要开通读取消息资源相关权限
 - 配置完成后发布应用
 
 ## 环境变量说明
@@ -63,7 +64,9 @@ npm run bot:stop --prefix /Users/erhu/code/python/CodexDesktopControl
 
 - 会话历史只保存在内存里，进程重启后会丢失
 - 机器人会先给你的消息加一个“已收到”的 reaction，再生成完整回复
-- 非文本消息目前会返回兜底提示
+- 当前支持文本消息和图片消息；其它类型仍会返回兜底提示
+- 图片消息会先下载到本机临时目录，再通过 `codex exec -i` 作为输入图片交给模型
+- 如果 Codex 的最终回复里包含本机图片绝对路径，或 `![alt](/absolute/path.png)` 这种 Markdown 图片，机器人会自动上传并发送该图片
 - 长连接模式不需要公网回调地址
 - 这台机器本地需要先能正常使用 `codex`
 - 首次启动时会把默认的 `AGENTS.md`、`PROFILE.md`、`MEMORY.md`、`SOUL.md`、`BOOTSTRAP.md`、`HEARTBEAT.md` 初始化到 `CODEX_WORKDIR`
