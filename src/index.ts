@@ -45,6 +45,7 @@ const codexSandboxRaw = process.env.CODEX_SANDBOX || "read-only";
 const codexModel = process.env.CODEX_MODEL;
 const codexWorkdir = process.env.CODEX_WORKDIR || process.cwd();
 const codexPromptTemplateDir = process.env.CODEX_PROMPT_DIR;
+const codexSkillsDir = process.env.CODEX_SKILLS_DIR;
 const extraSystemPrompt = process.env.CODEX_SYSTEM_PROMPT;
 const shouldLogContent = includeContentInLogs();
 const shouldLogPrompt = includePromptInLogs();
@@ -64,6 +65,7 @@ function getSystemPrompt(conversationText?: string): string {
     extraPrompt: extraSystemPrompt,
     templateDir: codexPromptTemplateDir,
     conversationText,
+    skillsDir: codexSkillsDir,
   });
 }
 
@@ -77,7 +79,7 @@ const MAX_CHAT_SESSIONS = 200;
 
 class LRUMap<K, V> {
   private map = new Map<K, V>();
-  constructor(private capacity: number) {}
+  constructor(private capacity: number) { }
 
   get(key: K): V | undefined {
     const value = this.map.get(key);
@@ -110,7 +112,7 @@ class LRUMap<K, V> {
 class CappedSet<T> {
   private set = new Set<T>();
   private queue: T[] = [];
-  constructor(private capacity: number) {}
+  constructor(private capacity: number) { }
 
   has(value: T): boolean {
     return this.set.has(value);
@@ -190,16 +192,16 @@ When you need the bot to send a non-image file to the user, include one line per
     promptChars: prompt.length,
     ...(shouldLogContent
       ? {
-          userText: rawLogString(userText),
-          historyText: rawLogString(historyText),
-          transcript: rawLogString(transcript),
-        }
+        userText: rawLogString(userText),
+        historyText: rawLogString(historyText),
+        transcript: rawLogString(transcript),
+      }
       : {}),
     ...(shouldLogPrompt
       ? {
-          systemPrompt: rawLogString(systemPrompt),
-          prompt: rawLogString(prompt),
-        }
+        systemPrompt: rawLogString(systemPrompt),
+        prompt: rawLogString(prompt),
+      }
       : {}),
   });
 
@@ -210,6 +212,7 @@ When you need the bot to send a non-image file to the user, include one line per
     model: codexModel,
     prompt,
     imagePaths,
+    enableSkills: Boolean(codexSkillsDir),
   });
 
   const nextHistory = trimHistory([
@@ -225,8 +228,8 @@ When you need the bot to send a non-image file to the user, include one line per
     nextHistoryTurns: nextHistory.length,
     ...(shouldLogContent
       ? {
-          replyText: rawLogString(outputText),
-        }
+        replyText: rawLogString(outputText),
+      }
       : {}),
   });
 
@@ -250,10 +253,10 @@ async function processTextMessage(message: {
     userTextChars: userText.length,
     ...(shouldLogContent
       ? {
-          larkContent: rawLogString(message.content),
-          rawText: rawLogString(rawText),
-          userText: rawLogString(userText),
-        }
+        larkContent: rawLogString(message.content),
+        rawText: rawLogString(rawText),
+        userText: rawLogString(userText),
+      }
       : {}),
   });
 
@@ -311,8 +314,8 @@ async function processImageMessage(message: {
     messageType: message.message_type,
     ...(shouldLogContent
       ? {
-          larkContent: rawLogString(message.content),
-        }
+        larkContent: rawLogString(message.content),
+      }
       : {}),
   });
 
@@ -390,8 +393,8 @@ async function handleMessage(event: {
     mentionCount: message.mentions?.length || 0,
     ...(shouldLogContent
       ? {
-          larkContent: rawLogString(message.content),
-        }
+        larkContent: rawLogString(message.content),
+      }
       : {}),
   });
 
@@ -456,6 +459,7 @@ async function main(): Promise<void> {
     codexModel: codexModel || null,
     codexWorkdir,
     promptTemplateDir: codexPromptTemplateDir || null,
+    skillsDir: codexSkillsDir || null,
     extraSystemPrompt: extraSystemPrompt ? "<set>" : null,
     logIncludeContent: shouldLogContent,
     logIncludePrompt: shouldLogPrompt,

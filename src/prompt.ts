@@ -7,6 +7,8 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { buildSkillsPromptSection } from "./skills.js";
+
 const CORE_PROMPT_FILE_ORDER = [
   "AGENTS.md",
   "PROFILE.md",
@@ -164,6 +166,7 @@ export function buildSystemPrompt(options: {
   extraPrompt?: string;
   templateDir?: string;
   conversationText?: string;
+  skillsDir?: string;
 }): string {
   const templateDir = resolvePromptDir(options.templateDir);
   ensureWorkspacePromptFiles(options.workdir, templateDir);
@@ -185,6 +188,13 @@ export function buildSystemPrompt(options: {
   );
   if (sections.length > 0) {
     parts.push(sections.join("\n\n"));
+  }
+
+  if (options.skillsDir?.trim()) {
+    const skillsSection = buildSkillsPromptSection(options.skillsDir);
+    if (skillsSection) {
+      parts.push(skillsSection);
+    }
   }
 
   const bootstrapBlock = buildBootstrapBlock(
