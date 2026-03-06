@@ -1,6 +1,6 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { createReadStream } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -48,6 +48,33 @@ async function sendPlainText(
       content: JSON.stringify({ text }),
     },
   });
+}
+
+const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024;
+
+type LarkFileType = "opus" | "mp4" | "pdf" | "doc" | "xls" | "ppt" | "stream";
+
+function detectLarkFileType(filePath: string): LarkFileType {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case ".opus":
+      return "opus";
+    case ".mp4":
+      return "mp4";
+    case ".pdf":
+      return "pdf";
+    case ".doc":
+    case ".docx":
+      return "doc";
+    case ".xls":
+    case ".xlsx":
+      return "xls";
+    case ".ppt":
+    case ".pptx":
+      return "ppt";
+    default:
+      return "stream";
+  }
 }
 
 function formatCardFallbackText(text: string): string {
@@ -145,6 +172,59 @@ export async function sendImage(
   });
 }
 
+export async function sendFile(
+  client: Lark.Client,
+  chatId: string,
+  filePath: string,
+): Promise<void> {
+  logger.info("lark.send_file.start", {
+    chatId,
+    filePath,
+  });
+
+  const fileStat = await stat(filePath);
+  if (!fileStat.isFile()) {
+    throw new Error(`不是可发送的文件：${filePath}`);
+  }
+  if (fileStat.size <= 0) {
+    throw new Error(`文件为空，无法发送：${filePath}`);
+  }
+  if (fileStat.size > MAX_FILE_SIZE_BYTES) {
+    throw new Error(
+      `文件超过 30MB，无法发送：${path.basename(filePath)} (${fileStat.size} bytes)`,
+    );
+  }
+
+  const upload = await client.im.file.create({
+    data: {
+      file_type: detectLarkFileType(filePath),
+      file_name: path.basename(filePath),
+      file: createReadStream(filePath),
+    },
+  });
+
+  const fileKey = upload?.file_key;
+  if (!fileKey) {
+    throw new Error(`上传文件失败：${filePath}`);
+  }
+
+  await client.im.message.create({
+    params: { receive_id_type: "chat_id" },
+    data: {
+      receive_id: chatId,
+      msg_type: "file",
+      content: JSON.stringify({ file_key: fileKey }),
+    },
+  });
+
+  logger.info("lark.send_file.success", {
+    chatId,
+    filePath,
+    fileKey,
+    fileSize: fileStat.size,
+  });
+}
+
 export async function sendReply(
   client: Lark.Client,
   chatId: string,
@@ -156,6 +236,7 @@ export async function sendReply(
     chatId,
     textChars: payload.text.length,
     imageCount: payload.imagePaths.length,
+    fileCount: payload.filePaths.length,
     ...(shouldLogContent
       ? {
           reply: rawLogString(reply),
@@ -166,15 +247,19 @@ export async function sendReply(
 
   if (payload.text) {
     await sendText(client, chatId, payload.text);
-  } else if (payload.imagePaths.length > 0) {
-    await sendText(client, chatId, "图片已发送。");
+  } else if (payload.imagePaths.length > 0 || payload.filePaths.length > 0) {
+    await sendText(client, chatId, "附件已发送。");
   }
 
   for (const imagePath of payload.imagePaths) {
     await sendImage(client, chatId, imagePath);
   }
 
-  if (!payload.text && payload.imagePaths.length === 0) {
+  for (const filePath of payload.filePaths) {
+    await sendFile(client, chatId, filePath);
+  }
+
+  if (!payload.text && payload.imagePaths.length === 0 && payload.filePaths.length === 0) {
     await sendText(client, chatId, reply);
   }
 }

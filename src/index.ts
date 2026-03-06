@@ -177,7 +177,8 @@ Conversation so far:
 ${transcript}
 
 Reply to the latest USER message only.
-When you create or reference an image that should be sent back to the user in Feishu, include the image file path in your final reply. Prefer an absolute path or Markdown image syntax like ![label](/absolute/path.png). Relative paths are resolved from the working directory.`;
+When you create or reference an image that should be sent back to the user in Feishu, include the image file path in your final reply. Prefer an absolute path or Markdown image syntax like ![label](/absolute/path.png). Relative paths are resolved from the working directory.
+When you need the bot to send a non-image file to the user, include one line per file in the exact format: FILE: /absolute/or/relative/path.ext`;
 
   logger.info("reply.generate.start", {
     chatId,

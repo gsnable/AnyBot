@@ -67,10 +67,12 @@ npm run bot:stop --prefix /Users/erhu/code/python/CodexDesktopControl
 
 - 会话历史只保存在内存里，进程重启后会丢失
 - 机器人会先给你的消息加一个“已收到”的 reaction，再生成完整回复
-- 当前支持文本消息和图片消息；其它类型仍会返回兜底提示
+- 当前支持接收文本消息和图片消息；其它类型仍会返回兜底提示
 - 文本消息输入 `/new` 会清空当前会话历史，并回复“新窗口已开启”
 - 图片消息会先下载到本机临时目录，再通过 `codex exec -i` 作为输入图片交给模型
 - 如果 Codex 的最终回复里包含本机图片绝对路径，或 `![alt](/absolute/path.png)` 这种 Markdown 图片，机器人会自动上传并发送该图片
+- 如果 Codex 的最终回复里包含形如 `FILE: /absolute/or/relative/path.ext` 的行，机器人会把该本机文件上传并作为飞书文件消息发送（`xlsx/docx/txt` 等均可）
+- 飞书文件上传单个文件大小上限是 30MB，且不能是空文件
 - 长连接模式不需要公网回调地址
 - 这台机器本地需要先能正常使用 `codex`
 - 首次启动时会把默认的 `AGENTS.md`、`PROFILE.md`、`MEMORY.md`、`SOUL.md`、`BOOTSTRAP.md` 初始化到 `CODEX_WORKDIR`

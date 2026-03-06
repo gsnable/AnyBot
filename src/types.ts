@@ -23,6 +23,7 @@ export type IncomingMessage = {
 export type ReplyPayload = {
   text: string;
   imagePaths: string[];
+  filePaths: string[];
 };
 
 export const sandboxModes = [
