@@ -76,7 +76,7 @@ export async function runCodex(opts: RunCodexOptions): Promise<string> {
     args.push("-i", imagePath);
   }
 
-  args.push(prompt);
+  args.push("--", prompt);
 
   logger.info("codex.exec.start", {
     bin,
