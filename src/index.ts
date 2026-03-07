@@ -27,6 +27,7 @@ import {
   logger,
   rawLogString,
 } from "./logger.js";
+import { getCurrentModel } from "./web/model-config.js";
 
 const requiredEnv = ["FEISHU_APP_ID", "FEISHU_APP_SECRET"] as const;
 
@@ -43,7 +44,6 @@ const botOpenId = process.env.FEISHU_BOT_OPEN_ID;
 const ackReaction = process.env.FEISHU_ACK_REACTION || "OK";
 const codexBin = process.env.CODEX_BIN || "codex";
 const codexSandboxRaw = process.env.CODEX_SANDBOX || "read-only";
-const codexModel = process.env.CODEX_MODEL;
 const codexWorkdir = process.env.CODEX_WORKDIR || process.cwd();
 const extraSystemPrompt = process.env.CODEX_SYSTEM_PROMPT;
 const shouldLogContent = includeContentInLogs();
@@ -231,7 +231,7 @@ async function generateReply(
     bin: codexBin,
     workdir: codexWorkdir,
     sandbox: codexSandbox,
-    model: codexModel,
+    model: getCurrentModel(),
     prompt,
     imagePaths,
     sessionId: sessionId || undefined,
@@ -480,7 +480,7 @@ async function main(): Promise<void> {
     ackReaction,
     codexBin,
     codexSandbox,
-    codexModel: codexModel || null,
+    codexModel: getCurrentModel(),
     codexWorkdir,
     extraSystemPrompt: extraSystemPrompt ? "<set>" : null,
     logIncludeContent: shouldLogContent,

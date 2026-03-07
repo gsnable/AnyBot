@@ -216,6 +216,10 @@
     border-top: 1px solid var(--border);
   }
 
+  .model-switcher {
+    position: relative;
+  }
+
   .model-badge {
     display: flex;
     align-items: center;
@@ -226,6 +230,15 @@
     border-radius: 8px;
     font-size: 12px;
     color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.18s ease;
+    user-select: none;
+  }
+
+  .model-badge:hover {
+    background: rgba(124, 111, 247, 0.15);
+    border-color: rgba(124, 111, 247, 0.35);
+    box-shadow: 0 0 16px var(--accent-glow);
   }
 
   .model-dot {
@@ -246,6 +259,92 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     color: var(--text);
+    flex: 1;
+  }
+
+  .model-badge-arrow {
+    width: 12px;
+    height: 12px;
+    color: var(--text-dim);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .model-switcher.open .model-badge-arrow {
+    transform: rotate(180deg);
+  }
+
+  .model-switcher.open .model-badge {
+    border-color: rgba(124, 111, 247, 0.4);
+    box-shadow: 0 0 20px var(--accent-glow);
+  }
+
+  .model-dropdown {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: #16161c;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition: all 0.18s ease;
+    z-index: 50;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .model-switcher.open .model-dropdown {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
+  .model-option {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+
+  .model-option:hover {
+    background: var(--sidebar-hover);
+  }
+
+  .model-option.active {
+    background: var(--accent-dim);
+    border: 1px solid rgba(124, 111, 247, 0.2);
+  }
+
+  .model-option:not(.active) {
+    border: 1px solid transparent;
+  }
+
+  .model-option-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .model-option-check {
+    width: 14px;
+    height: 14px;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .model-option-desc {
+    font-size: 10px;
+    color: var(--text-dim);
+    padding-left: 20px;
   }
 
   #main {
@@ -573,10 +672,16 @@
   <div class="history-list" id="history-list"></div>
 
   <div class="sidebar-footer">
-    <div class="model-badge">
-      <div class="model-dot"></div>
-      <span>本地模型</span>
-      <span class="model-name">codex</span>
+    <div class="model-switcher" id="model-switcher">
+      <div class="model-dropdown" id="model-dropdown"></div>
+      <div class="model-badge" id="model-badge">
+        <div class="model-dot"></div>
+        <span>本地模型</span>
+        <span class="model-name" id="current-model-name">加载中…</span>
+        <svg class="model-badge-arrow" viewBox="0 0 12 12" fill="none">
+          <path d="M3 5l3-3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
     </div>
   </div>
 </aside>
@@ -611,9 +716,15 @@
   const historyList = document.getElementById('history-list');
   const newChatBtn = document.getElementById('new-chat-btn');
 
+  const modelSwitcher = document.getElementById('model-switcher');
+  const modelBadge = document.getElementById('model-badge');
+  const modelDropdown = document.getElementById('model-dropdown');
+  const currentModelNameEl = document.getElementById('current-model-name');
+
   let currentSessionId = null;
   let isTyping = false;
   let sessions = [];
+  let modelConfig = null;
 
   inputEl.addEventListener('input', function () {
     this.style.height = 'auto';
@@ -898,8 +1009,78 @@
     sendBtn.disabled = inputEl.value.trim() === '';
   }
 
+  async function fetchModelConfig() {
+    try {
+      var res = await fetch('/api/model-config');
+      modelConfig = await res.json();
+      currentModelNameEl.textContent = modelConfig.currentModel;
+      renderModelDropdown();
+    } catch (e) {
+      currentModelNameEl.textContent = 'error';
+      console.error('Failed to fetch model config:', e);
+    }
+  }
+
+  function renderModelDropdown() {
+    if (!modelConfig) return;
+    modelDropdown.innerHTML = '';
+    modelConfig.models.forEach(function (m) {
+      var opt = document.createElement('div');
+      opt.className = 'model-option' + (m.id === modelConfig.currentModel ? ' active' : '');
+      opt.innerHTML =
+        '<div class="model-option-name">' +
+          (m.id === modelConfig.currentModel
+            ? '<svg class="model-option-check" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+            : '<span style="width:14px;display:inline-block"></span>') +
+          escapeHtml(m.id) +
+        '</div>' +
+        '<div class="model-option-desc">' + escapeHtml(m.description) + '</div>';
+      opt.addEventListener('click', function (e) {
+        e.stopPropagation();
+        switchModel(m.id);
+      });
+      modelDropdown.appendChild(opt);
+    });
+  }
+
+  async function switchModel(modelId) {
+    if (!modelConfig || modelId === modelConfig.currentModel) {
+      modelSwitcher.classList.remove('open');
+      return;
+    }
+    try {
+      var res = await fetch('/api/model-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelId: modelId }),
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function () { return {}; });
+        showError(err.error || '切换模型失败');
+        return;
+      }
+      modelConfig = await res.json();
+      currentModelNameEl.textContent = modelConfig.currentModel;
+      renderModelDropdown();
+      modelSwitcher.classList.remove('open');
+    } catch (e) {
+      showError('切换模型失败');
+    }
+  }
+
+  modelBadge.addEventListener('click', function (e) {
+    e.stopPropagation();
+    modelSwitcher.classList.toggle('open');
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!modelSwitcher.contains(e.target)) {
+      modelSwitcher.classList.remove('open');
+    }
+  });
+
   async function init() {
-    await fetchSessions();
+    await Promise.all([fetchSessions(), fetchModelConfig()]);
     if (sessions.length > 0) {
       await loadSession(sessions[0].id);
     } else {

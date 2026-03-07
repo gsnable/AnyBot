@@ -6,10 +6,10 @@ import { sandboxModes } from "../types.js";
 import { buildSystemPrompt } from "../prompt.js";
 import { logger } from "../logger.js";
 import * as db from "./db.js";
+import { readModelConfig, getCurrentModel, setCurrentModel } from "./model-config.js";
 
 const codexBin = process.env.CODEX_BIN || "codex";
 const codexSandboxRaw = process.env.CODEX_SANDBOX || "read-only";
-const codexModel = process.env.CODEX_MODEL;
 const codexWorkdir = process.env.CODEX_WORKDIR || process.cwd();
 const extraSystemPrompt = process.env.CODEX_SYSTEM_PROMPT;
 
@@ -98,6 +98,30 @@ export function chatRouter(): Router {
     res.json({ ok: true });
   });
 
+  router.get("/model-config", (_req: Request, res: Response) => {
+    try {
+      res.json(readModelConfig());
+    } catch (error) {
+      res.status(500).json({ error: "读取模型配置失败" });
+    }
+  });
+
+  router.put("/model-config", (req: Request, res: Response) => {
+    const { modelId } = req.body as { modelId?: string };
+    if (!modelId) {
+      res.status(400).json({ error: "缺少 modelId" });
+      return;
+    }
+    try {
+      const config = setCurrentModel(modelId);
+      logger.info("model.switched", { modelId });
+      res.json(config);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "切换模型失败";
+      res.status(400).json({ error: msg });
+    }
+  });
+
   router.post("/sessions/:id/messages", async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const session = db.getSession(id);
@@ -134,7 +158,7 @@ export function chatRouter(): Router {
         bin: codexBin,
         workdir: codexWorkdir,
         sandbox: codexSandbox,
-        model: codexModel,
+        model: getCurrentModel(),
         prompt,
         sessionId: session.sessionId || undefined,
       });
