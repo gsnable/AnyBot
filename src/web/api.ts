@@ -11,6 +11,7 @@ import {
   readChannelsConfig,
   updateChannelConfig,
   getRegisteredChannelTypes,
+  channelManager,
 } from "../channels/index.js";
 
 const codexBin = process.env.CODEX_BIN || "codex";
@@ -148,6 +149,10 @@ export function chatRouter(): Router {
       const config = updateChannelConfig(channelType, req.body);
       logger.info("channel.config.updated", { channelType });
       res.json(config);
+
+      channelManager.restartChannel(channelType).catch((error) => {
+        logger.error("channel.restart_after_save_failed", { channelType, error });
+      });
     } catch (error) {
       const msg = error instanceof Error ? error.message : "更新频道配置失败";
       res.status(400).json({ error: msg });

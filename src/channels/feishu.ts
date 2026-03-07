@@ -93,9 +93,17 @@ export class FeishuChannel implements IChannel {
   }
 
   async stop(): Promise<void> {
+    if (this.wsClient) {
+      try {
+        this.wsClient.close({ force: true });
+      } catch (error) {
+        logger.warn("feishu.ws_close_failed", { error });
+      }
+    }
     this.wsClient = null;
     this.larkClient = null;
     this.callbacks = null;
+    this.config = null;
     logger.info("feishu.stopped");
   }
 
