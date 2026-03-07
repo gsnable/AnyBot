@@ -3,7 +3,7 @@ import "dotenv/config";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
-import type { ChatTurn, SandboxMode } from "./types.js";
+import type { SandboxMode } from "./types.js";
 import { sandboxModes } from "./types.js";
 import { parseIncomingText, sanitizeUserText } from "./message.js";
 import { buildSystemPrompt } from "./prompt.js";
@@ -68,7 +68,6 @@ const { client: larkClient, wsClient, EventDispatcher } = createLarkClients(appI
 
 // --- State with bounded memory ---
 
-const MAX_HISTORY_TURNS = 12;
 const MAX_HANDLED_IDS = 5000;
 const MAX_CHAT_SESSIONS = 200;
 
@@ -124,13 +123,56 @@ class CappedSet<T> {
   }
 }
 
-const historyByChat = new LRUMap<string, ChatTurn[]>(MAX_CHAT_SESSIONS);
+const sessionIdByChat = new LRUMap<string, string>(MAX_CHAT_SESSIONS);
+const sessionGenerationByChat = new Map<string, number>();
+const queueByChat = new Map<string, Promise<void>>();
 const handledMessageIds = new CappedSet<string>(MAX_HANDLED_IDS);
 
 // --- Core logic ---
 
-function trimHistory(turns: ChatTurn[]): ChatTurn[] {
-  return turns.slice(-MAX_HISTORY_TURNS);
+const outputContract = [
+  "只回复当前这条用户消息。",
+  "如果需要发送图片给用户，在回复中包含图片绝对路径或 Markdown 图片语法 ![描述](/绝对路径.png)。相对路径基于工作目录解析。",
+  "如果需要发送非图片文件，每个文件单独一行，格式：FILE: /绝对路径/文件名.扩展名。",
+].join("\n");
+
+function buildFirstTurnPrompt(userText: string): string {
+  return `${getSystemPrompt()}
+
+输出要求：
+${outputContract}
+
+用户消息：
+${userText}`;
+}
+
+function buildResumePrompt(userText: string): string {
+  return `${userText}
+
+补充要求：
+${outputContract}`;
+}
+
+function enqueueChatTask(chatId: string, task: () => Promise<void>): void {
+  const previous = queueByChat.get(chatId) || Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(task)
+    .finally(() => {
+      if (queueByChat.get(chatId) === next) {
+        queueByChat.delete(chatId);
+      }
+    });
+  queueByChat.set(chatId, next);
+}
+
+function getSessionGeneration(chatId: string): number {
+  return sessionGenerationByChat.get(chatId) || 0;
+}
+
+function resetChatSession(chatId: string): void {
+  sessionIdByChat.delete(chatId);
+  sessionGenerationByChat.set(chatId, getSessionGeneration(chatId) + 1);
 }
 
 function shouldReplyInGroup(
@@ -158,73 +200,58 @@ async function generateReply(
   chatId: string,
   userText: string,
   imagePaths: string[] = [],
-  historyText = userText,
 ): Promise<string> {
-  const history = historyByChat.get(chatId) || [];
-  const systemPrompt = getSystemPrompt();
-  const transcript = [...history, { role: "user" as const, content: historyText }]
-    .map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`)
-    .join("\n\n");
-  const prompt = `${systemPrompt}
-
-以下是对话历史：
-${transcript}
-
-只回复最新一条 USER 消息。
-如果需要发送图片给用户，在回复中包含图片绝对路径或 Markdown 图片语法 ![描述](/绝对路径.png)。相对路径基于工作目录解析。
-如果需要发送非图片文件，每个文件单独一行，格式：FILE: /绝对路径/文件名.扩展名`;
+  const sessionId = sessionIdByChat.get(chatId);
+  const sessionGeneration = getSessionGeneration(chatId);
+  const prompt = sessionId
+    ? buildResumePrompt(userText)
+    : buildFirstTurnPrompt(userText);
 
   logger.info("reply.generate.start", {
     chatId,
-    historyTurns: history.length,
+    mode: sessionId ? "resume" : "new",
+    sessionId: sessionId || null,
     userTextChars: userText.length,
-    historyTextChars: historyText.length,
     imageCount: imagePaths.length,
-    systemPromptChars: systemPrompt.length,
     promptChars: prompt.length,
     ...(shouldLogContent
       ? {
         userText: rawLogString(userText),
-        historyText: rawLogString(historyText),
-        transcript: rawLogString(transcript),
       }
       : {}),
     ...(shouldLogPrompt
       ? {
-        systemPrompt: rawLogString(systemPrompt),
         prompt: rawLogString(prompt),
       }
       : {}),
   });
 
-  const outputText = await runCodex({
+  const result = await runCodex({
     bin: codexBin,
     workdir: codexWorkdir,
     sandbox: codexSandbox,
     model: codexModel,
     prompt,
     imagePaths,
+    sessionId: sessionId || undefined,
   });
 
-  const nextHistory = trimHistory([
-    ...history,
-    { role: "user", content: historyText },
-    { role: "assistant", content: outputText },
-  ]);
-  historyByChat.set(chatId, nextHistory);
+  if (result.sessionId && sessionGeneration === getSessionGeneration(chatId)) {
+    sessionIdByChat.set(chatId, result.sessionId);
+  }
 
   logger.info("reply.generate.success", {
     chatId,
-    replyChars: outputText.length,
-    nextHistoryTurns: nextHistory.length,
+    sessionId: result.sessionId,
+    replyChars: result.text.length,
     ...(shouldLogContent
       ? {
-        replyText: rawLogString(outputText),
+        replyText: rawLogString(result.text),
       }
       : {}),
   });
 
-  return outputText;
+  return result.text;
 }
 
 // --- Message handlers ---
@@ -261,7 +288,7 @@ async function processTextMessage(message: {
   }
 
   if (userText === "/new") {
-    historyByChat.delete(message.chat_id);
+    resetChatSession(message.chat_id);
     logger.info("message.text.new_window", {
       messageId: message.message_id,
       chatId: message.chat_id,
@@ -280,17 +307,19 @@ async function processTextMessage(message: {
     });
   }
 
-  try {
-    const reply = await generateReply(message.chat_id, userText);
-    await sendReply(larkClient, message.chat_id, reply, codexWorkdir);
-  } catch (error) {
-    logger.error("message.text.failed", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-      error,
-    });
-    await sendText(larkClient, message.chat_id, formatCodexError(error));
-  }
+  enqueueChatTask(message.chat_id, async () => {
+    try {
+      const reply = await generateReply(message.chat_id, userText);
+      await sendReply(larkClient, message.chat_id, reply, codexWorkdir);
+    } catch (error) {
+      logger.error("message.text.failed", {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        error,
+      });
+      await sendText(larkClient, message.chat_id, formatCodexError(error));
+    }
+  });
 }
 
 async function processImageMessage(message: {
@@ -322,42 +351,43 @@ async function processImageMessage(message: {
 
   let imagePath: string | null = null;
 
-  try {
-    imagePath = await downloadImageFromMessage(larkClient, message);
-    const userText =
-      "用户发来了一张图片。请先根据图片内容直接回答；如果缺少上下文，就先简要描述图片里有什么，并询问对方希望你进一步做什么。";
-    const reply = await generateReply(
-      message.chat_id,
-      userText,
-      [imagePath],
-      "[用户发送了一张图片，请结合图片内容回答。]",
-    );
-    await sendReply(larkClient, message.chat_id, reply, codexWorkdir);
-  } catch (error) {
-    logger.error("message.image.failed", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-      error,
-    });
-    await sendText(
-      larkClient,
-      message.chat_id,
-      "图片收到了，但处理失败。请确认机器人有读取图片资源的权限后再试。",
-    );
-  } finally {
-    if (imagePath) {
-      await rm(path.dirname(imagePath), { recursive: true, force: true }).catch(
-        (cleanupError) => {
-          logger.warn("message.image.cleanup_failed", {
-            messageId: message.message_id,
-            chatId: message.chat_id,
-            imagePath,
-            error: cleanupError,
-          });
-        },
+  enqueueChatTask(message.chat_id, async () => {
+    try {
+      imagePath = await downloadImageFromMessage(larkClient, message);
+      const userText =
+        "用户发来了一张图片。请先根据图片内容直接回答；如果缺少上下文，就先简要描述图片里有什么，并询问对方希望你进一步做什么。";
+      const reply = await generateReply(
+        message.chat_id,
+        userText,
+        [imagePath],
       );
+      await sendReply(larkClient, message.chat_id, reply, codexWorkdir);
+    } catch (error) {
+      logger.error("message.image.failed", {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        error,
+      });
+      await sendText(
+        larkClient,
+        message.chat_id,
+        "图片收到了，但处理失败。请确认机器人有读取图片资源的权限后再试。",
+      );
+    } finally {
+      if (imagePath) {
+        await rm(path.dirname(imagePath), { recursive: true, force: true }).catch(
+          (cleanupError) => {
+            logger.warn("message.image.cleanup_failed", {
+              messageId: message.message_id,
+              chatId: message.chat_id,
+              imagePath,
+              error: cleanupError,
+            });
+          },
+        );
+      }
     }
-  }
+  });
 }
 
 // --- Event dispatch ---

@@ -43,10 +43,16 @@ export type RunCodexOptions = {
   model?: string;
   prompt: string;
   imagePaths?: string[];
+  sessionId?: string;
   timeoutMs?: number;
 };
 
-export async function runCodex(opts: RunCodexOptions): Promise<string> {
+export type RunCodexResult = {
+  text: string;
+  sessionId: string | null;
+};
+
+export async function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
   const {
     bin,
     workdir,
@@ -54,19 +60,27 @@ export async function runCodex(opts: RunCodexOptions): Promise<string> {
     model,
     prompt,
     imagePaths = [],
+    sessionId,
     timeoutMs = DEFAULT_TIMEOUT_MS,
   } = opts;
   const startedAt = Date.now();
 
-  const args = [
-    "exec",
-    "--json",
-    "--skip-git-repo-check",
-    "-C",
-    workdir,
-    "-s",
-    sandbox,
-  ];
+  const args = sessionId
+    ? [
+      "exec",
+      "resume",
+      "--json",
+      "--skip-git-repo-check",
+    ]
+    : [
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "-C",
+      workdir,
+      "-s",
+      sandbox,
+    ];
 
   if (model) {
     args.push("-m", model);
@@ -76,13 +90,17 @@ export async function runCodex(opts: RunCodexOptions): Promise<string> {
     args.push("-i", imagePath);
   }
 
-  args.push("--", prompt);
+  if (sessionId) {
+    args.push(sessionId);
+  }
+  args.push("-");
 
   logger.info("codex.exec.start", {
     bin,
     workdir,
     sandbox,
     model: model || null,
+    sessionId: sessionId || null,
     imageCount: imagePaths.length,
     promptChars: prompt.length,
     timeoutMs,
@@ -92,12 +110,13 @@ export async function runCodex(opts: RunCodexOptions): Promise<string> {
     const child = spawn(bin, args, {
       cwd: workdir,
       env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
     let stdout = "";
     let stderr = "";
     let killed = false;
+    let startedThreadId: string | null = null;
 
     const timer = setTimeout(() => {
       killed = true;
@@ -114,6 +133,9 @@ export async function runCodex(opts: RunCodexOptions): Promise<string> {
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
     });
+
+    child.stdin.write(prompt);
+    child.stdin.end();
 
     child.on("error", (error) => {
       clearTimeout(timer);
@@ -164,7 +186,11 @@ export async function runCodex(opts: RunCodexOptions): Promise<string> {
       const messages = lines
         .map((line) => {
           try {
-            return JSON.parse(line) as CodexJsonEvent;
+            const event = JSON.parse(line) as CodexJsonEvent;
+            if (event.type === "thread.started" && event.thread_id) {
+              startedThreadId = event.thread_id;
+            }
+            return event;
           } catch {
             return null;
           }
@@ -200,8 +226,12 @@ export async function runCodex(opts: RunCodexOptions): Promise<string> {
         stderrChars: stderr.length,
         messageCount: messages.length,
         replyChars: lastMessage.length,
+        sessionId: startedThreadId || sessionId || null,
       });
-      resolve(lastMessage);
+      resolve({
+        text: lastMessage,
+        sessionId: startedThreadId || sessionId || null,
+      });
     });
   });
 }

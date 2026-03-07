@@ -1,10 +1,3 @@
-export type ChatRole = "user" | "assistant";
-
-export type ChatTurn = {
-  role: ChatRole;
-  content: string;
-};
-
 export type TextMessageContent = {
   text?: string;
 };
@@ -38,6 +31,7 @@ export type CodexJsonEvent = {
   type?: string;
   thread_id?: string;
   item?: {
+    id?: string;
     type?: string;
     text?: string;
   };

@@ -7,7 +7,7 @@
 - 通过飞书长连接接收 `im.message.receive_v1` 事件
 - 把用户发来的文本或图片转发给本地 `codex exec`
 - 由机器人把结果回复回飞书
-- 按会话保存一小段内存中的上下文历史
+- 按会话复用 Codex 原生 session，只有 `/new` 才重新开会话
 - 默认在私聊直接回复，在群聊里仅被 @ 时回复
 
 ## 配置步骤
@@ -64,10 +64,11 @@ npm run bot:stop --prefix /Users/erhu/code/python/CodexDesktopControl
 
 ## 说明
 
-- 会话历史只保存在内存里，进程重启后会丢失
+- 每个飞书 chat 会在本进程内绑定一个 Codex `thread_id`，后续消息通过 `codex exec resume` 续聊，不再由桥接层手工拼接历史
+- 当前绑定关系只保存在内存里，进程重启后会丢失；重启后该 chat 的下一条消息会自动创建新的 Codex 会话
 - 机器人会先给你的消息加一个“已收到”的 reaction，再生成完整回复
 - 当前支持接收文本消息和图片消息；其它类型仍会返回兜底提示
-- 文本消息输入 `/new` 会清空当前会话历史，并回复“新窗口已开启”
+- 文本消息输入 `/new` 会丢弃当前 chat 绑定的 Codex 会话，并回复“新窗口已开启”
 - 图片消息会先下载到本机临时目录，再通过 `codex exec -i` 作为输入图片交给模型
 - 如果 Codex 的最终回复里包含本机图片绝对路径，或 `![alt](/absolute/path.png)` 这种 Markdown 图片，机器人会自动上传并发送该图片
 - 如果 Codex 的最终回复里包含形如 `FILE: /absolute/or/relative/path.ext` 的行，机器人会把该本机文件上传并作为飞书文件消息发送（`xlsx/docx/txt` 等均可）
