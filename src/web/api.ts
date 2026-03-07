@@ -7,6 +7,11 @@ import { buildSystemPrompt } from "../prompt.js";
 import { logger } from "../logger.js";
 import * as db from "./db.js";
 import { readModelConfig, getCurrentModel, setCurrentModel } from "./model-config.js";
+import {
+  readChannelsConfig,
+  updateChannelConfig,
+  getRegisteredChannelTypes,
+} from "../channels/index.js";
 
 const codexBin = process.env.CODEX_BIN || "codex";
 const codexSandboxRaw = process.env.CODEX_SANDBOX || "read-only";
@@ -118,6 +123,33 @@ export function chatRouter(): Router {
       res.json(config);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "切换模型失败";
+      res.status(400).json({ error: msg });
+    }
+  });
+
+  router.get("/channels", (_req: Request, res: Response) => {
+    try {
+      const config = readChannelsConfig();
+      const registered = getRegisteredChannelTypes();
+      res.json({ registered, config });
+    } catch (error) {
+      res.status(500).json({ error: "读取频道配置失败" });
+    }
+  });
+
+  router.put("/channels/:type", (req: Request, res: Response) => {
+    const channelType = req.params.type as string;
+    const registered = getRegisteredChannelTypes();
+    if (!registered.includes(channelType)) {
+      res.status(400).json({ error: `不支持的频道类型: ${channelType}` });
+      return;
+    }
+    try {
+      const config = updateChannelConfig(channelType, req.body);
+      logger.info("channel.config.updated", { channelType });
+      res.json(config);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "更新频道配置失败";
       res.status(400).json({ error: msg });
     }
   });

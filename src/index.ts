@@ -1,12 +1,9 @@
 import "dotenv/config";
 
-import { rm } from "node:fs/promises";
-import path from "node:path";
 import { createApp } from "./web/server.js";
 
 import type { SandboxMode } from "./types.js";
 import { sandboxModes } from "./types.js";
-import { parseIncomingText, sanitizeUserText } from "./message.js";
 import { buildSystemPrompt } from "./prompt.js";
 import {
   runCodex,
@@ -15,33 +12,15 @@ import {
   CodexEmptyOutputError,
 } from "./codex.js";
 import {
-  createLarkClients,
-  sendText,
-  sendReply,
-  sendAckReaction,
-  downloadImageFromMessage,
-} from "./lark.js";
-import {
   includeContentInLogs,
   includePromptInLogs,
   logger,
   rawLogString,
 } from "./logger.js";
 import { getCurrentModel } from "./web/model-config.js";
+import { startAllChannels } from "./channels/index.js";
+import type { ChannelCallbacks } from "./channels/index.js";
 
-const requiredEnv = ["FEISHU_APP_ID", "FEISHU_APP_SECRET"] as const;
-
-for (const key of requiredEnv) {
-  if (!process.env[key]) {
-    throw new Error(`缺少必填环境变量：${key}`);
-  }
-}
-
-const appId = process.env.FEISHU_APP_ID as string;
-const appSecret = process.env.FEISHU_APP_SECRET as string;
-const groupChatMode = process.env.FEISHU_GROUP_CHAT_MODE || "mention";
-const botOpenId = process.env.FEISHU_BOT_OPEN_ID;
-const ackReaction = process.env.FEISHU_ACK_REACTION || "OK";
 const codexBin = process.env.CODEX_BIN || "codex";
 const codexSandboxRaw = process.env.CODEX_SANDBOX || "read-only";
 const codexWorkdir = process.env.CODEX_WORKDIR || process.cwd();
@@ -65,16 +44,13 @@ function getSystemPrompt(): string {
   });
 }
 
-const { client: larkClient, wsClient, EventDispatcher } = createLarkClients(appId, appSecret);
-
 // --- State with bounded memory ---
 
-const MAX_HANDLED_IDS = 5000;
 const MAX_CHAT_SESSIONS = 200;
 
 class LRUMap<K, V> {
   private map = new Map<K, V>();
-  constructor(private capacity: number) { }
+  constructor(private capacity: number) {}
 
   get(key: K): V | undefined {
     const value = this.map.get(key);
@@ -104,30 +80,8 @@ class LRUMap<K, V> {
   }
 }
 
-class CappedSet<T> {
-  private set = new Set<T>();
-  private queue: T[] = [];
-  constructor(private capacity: number) { }
-
-  has(value: T): boolean {
-    return this.set.has(value);
-  }
-
-  add(value: T): void {
-    if (this.set.has(value)) return;
-    if (this.set.size >= this.capacity) {
-      const oldest = this.queue.shift()!;
-      this.set.delete(oldest);
-    }
-    this.set.add(value);
-    this.queue.push(value);
-  }
-}
-
 const sessionIdByChat = new LRUMap<string, string>(MAX_CHAT_SESSIONS);
 const sessionGenerationByChat = new Map<string, number>();
-const queueByChat = new Map<string, Promise<void>>();
-const handledMessageIds = new CappedSet<string>(MAX_HANDLED_IDS);
 
 // --- Core logic ---
 
@@ -154,19 +108,6 @@ function buildResumePrompt(userText: string): string {
 ${outputContract}`;
 }
 
-function enqueueChatTask(chatId: string, task: () => Promise<void>): void {
-  const previous = queueByChat.get(chatId) || Promise.resolve();
-  const next = previous
-    .catch(() => undefined)
-    .then(task)
-    .finally(() => {
-      if (queueByChat.get(chatId) === next) {
-        queueByChat.delete(chatId);
-      }
-    });
-  queueByChat.set(chatId, next);
-}
-
 function getSessionGeneration(chatId: string): number {
   return sessionGenerationByChat.get(chatId) || 0;
 }
@@ -174,14 +115,6 @@ function getSessionGeneration(chatId: string): number {
 function resetChatSession(chatId: string): void {
   sessionIdByChat.delete(chatId);
   sessionGenerationByChat.set(chatId, getSessionGeneration(chatId) + 1);
-}
-
-function shouldReplyInGroup(
-  mentions: Array<{ id?: { open_id?: string } }> = [],
-): boolean {
-  if (groupChatMode === "all") return true;
-  if (botOpenId) return mentions.some((m) => m.id?.open_id === botOpenId);
-  return mentions.length > 0;
 }
 
 function formatCodexError(error: unknown): string {
@@ -215,16 +148,8 @@ async function generateReply(
     userTextChars: userText.length,
     imageCount: imagePaths.length,
     promptChars: prompt.length,
-    ...(shouldLogContent
-      ? {
-        userText: rawLogString(userText),
-      }
-      : {}),
-    ...(shouldLogPrompt
-      ? {
-        prompt: rawLogString(prompt),
-      }
-      : {}),
+    ...(shouldLogContent ? { userText: rawLogString(userText) } : {}),
+    ...(shouldLogPrompt ? { prompt: rawLogString(prompt) } : {}),
   });
 
   const result = await runCodex({
@@ -245,239 +170,25 @@ async function generateReply(
     chatId,
     sessionId: result.sessionId,
     replyChars: result.text.length,
-    ...(shouldLogContent
-      ? {
-        replyText: rawLogString(result.text),
-      }
-      : {}),
+    ...(shouldLogContent ? { replyText: rawLogString(result.text) } : {}),
   });
 
   return result.text;
 }
 
-// --- Message handlers ---
+// --- Channel callbacks ---
 
-async function processTextMessage(message: {
-  message_id: string;
-  chat_id: string;
-  content: string;
-}): Promise<void> {
-  const rawText = parseIncomingText(message.content);
-  const userText = sanitizeUserText(rawText);
+const channelCallbacks: ChannelCallbacks = {
+  generateReply,
+  resetSession: resetChatSession,
+};
 
-  logger.info("message.text.received", {
-    messageId: message.message_id,
-    chatId: message.chat_id,
-    rawTextChars: rawText.length,
-    userTextChars: userText.length,
-    ...(shouldLogContent
-      ? {
-        larkContent: rawLogString(message.content),
-        rawText: rawLogString(rawText),
-        userText: rawLogString(userText),
-      }
-      : {}),
-  });
-
-  if (!userText) {
-    logger.warn("message.text.empty", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-    });
-    await sendText(larkClient, message.chat_id, "请直接发送文字问题。");
-    return;
-  }
-
-  if (userText === "/new") {
-    resetChatSession(message.chat_id);
-    logger.info("message.text.new_window", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-    });
-    await sendText(larkClient, message.chat_id, "新窗口已开启，我们可以继续聊天了");
-    return;
-  }
-
-  try {
-    await sendAckReaction(larkClient, message.message_id, ackReaction);
-  } catch (error) {
-    logger.warn("message.ack_failed", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-      error,
-    });
-  }
-
-  enqueueChatTask(message.chat_id, async () => {
-    try {
-      const reply = await generateReply(message.chat_id, userText);
-      await sendReply(larkClient, message.chat_id, reply, codexWorkdir);
-    } catch (error) {
-      logger.error("message.text.failed", {
-        messageId: message.message_id,
-        chatId: message.chat_id,
-        error,
-      });
-      await sendText(larkClient, message.chat_id, formatCodexError(error));
-    }
-  });
-}
-
-async function processImageMessage(message: {
-  message_id: string;
-  chat_id: string;
-  message_type: string;
-  content: string;
-}): Promise<void> {
-  logger.info("message.image.received", {
-    messageId: message.message_id,
-    chatId: message.chat_id,
-    messageType: message.message_type,
-    ...(shouldLogContent
-      ? {
-        larkContent: rawLogString(message.content),
-      }
-      : {}),
-  });
-
-  try {
-    await sendAckReaction(larkClient, message.message_id, ackReaction);
-  } catch (error) {
-    logger.warn("message.ack_failed", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-      error,
-    });
-  }
-
-  let imagePath: string | null = null;
-
-  enqueueChatTask(message.chat_id, async () => {
-    try {
-      imagePath = await downloadImageFromMessage(larkClient, message);
-      const userText =
-        "用户发来了一张图片。请先根据图片内容直接回答；如果缺少上下文，就先简要描述图片里有什么，并询问对方希望你进一步做什么。";
-      const reply = await generateReply(
-        message.chat_id,
-        userText,
-        [imagePath],
-      );
-      await sendReply(larkClient, message.chat_id, reply, codexWorkdir);
-    } catch (error) {
-      logger.error("message.image.failed", {
-        messageId: message.message_id,
-        chatId: message.chat_id,
-        error,
-      });
-      await sendText(
-        larkClient,
-        message.chat_id,
-        "图片收到了，但处理失败。请确认机器人有读取图片资源的权限后再试。",
-      );
-    } finally {
-      if (imagePath) {
-        await rm(path.dirname(imagePath), { recursive: true, force: true }).catch(
-          (cleanupError) => {
-            logger.warn("message.image.cleanup_failed", {
-              messageId: message.message_id,
-              chatId: message.chat_id,
-              imagePath,
-              error: cleanupError,
-            });
-          },
-        );
-      }
-    }
-  });
-}
-
-// --- Event dispatch ---
-
-async function handleMessage(event: {
-  sender: { sender_type: string };
-  message: {
-    message_id: string;
-    chat_id: string;
-    chat_type: string;
-    message_type: string;
-    content: string;
-    mentions?: Array<{ id?: { open_id?: string } }>;
-  };
-}): Promise<void> {
-  const { sender, message } = event;
-
-  logger.info("message.received", {
-    messageId: message.message_id,
-    chatId: message.chat_id,
-    chatType: message.chat_type,
-    messageType: message.message_type,
-    senderType: sender.sender_type,
-    mentionCount: message.mentions?.length || 0,
-    ...(shouldLogContent
-      ? {
-        larkContent: rawLogString(message.content),
-      }
-      : {}),
-  });
-
-  if (sender.sender_type === "app") {
-    logger.debug("message.skipped.app_sender", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-    });
-    return;
-  }
-
-  if (handledMessageIds.has(message.message_id)) {
-    logger.debug("message.skipped.duplicate", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-    });
-    return;
-  }
-  handledMessageIds.add(message.message_id);
-
-  if (message.message_type !== "text" && message.message_type !== "image") {
-    logger.warn("message.unsupported_type", {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-      messageType: message.message_type,
-    });
-    await sendText(larkClient, message.chat_id, "目前只支持文本和图片消息。");
-    return;
-  }
-
-  if (message.chat_type === "group" || message.chat_type === "group_chat") {
-    if (!shouldReplyInGroup(message.mentions)) {
-      logger.debug("message.skipped.group_filter", {
-        messageId: message.message_id,
-        chatId: message.chat_id,
-        mentionCount: message.mentions?.length || 0,
-        groupChatMode,
-        botOpenId: botOpenId || null,
-      });
-      return;
-    }
-  }
-
-  if (message.message_type === "image") {
-    void processImageMessage(message);
-    return;
-  }
-
-  void processTextMessage(message);
-}
-
-const dispatcher = new EventDispatcher({}).register({
-  "im.message.receive_v1": handleMessage,
-});
+// --- Startup ---
 
 const WEB_PORT = parseInt(process.env.WEB_PORT || "19981", 10);
 
 async function main(): Promise<void> {
   logger.info("service.starting", {
-    groupChatMode,
-    ackReaction,
     codexBin,
     codexSandbox,
     codexModel: getCurrentModel(),
@@ -494,8 +205,10 @@ async function main(): Promise<void> {
     console.log(`Codex Web UI: http://localhost:${WEB_PORT}`);
   });
 
-  await wsClient.start({ eventDispatcher: dispatcher });
-  logger.info("service.started");
+  const channels = await startAllChannels(channelCallbacks);
+  logger.info("service.started", {
+    activeChannels: channels.map((c) => c.type),
+  });
 }
 
 main().catch((error) => {
