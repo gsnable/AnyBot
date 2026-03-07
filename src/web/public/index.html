@@ -1542,7 +1542,10 @@
         }
 
         async function createNewChat() {
-            if (!isChannelView && currentSessionId && !document.querySelector('#messages .message-row')) {
+            if (isChannelView) {
+                showChatView();
+            }
+            if (currentSessionId && !document.querySelector('#messages .message-row')) {
                 inputEl.focus();
                 return;
             }
