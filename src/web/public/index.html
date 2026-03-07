@@ -86,10 +86,10 @@
 
   #new-chat-btn {
     width: 100%;
-    background: var(--accent-dim);
-    border: 1px solid rgba(124, 111, 247, 0.2);
+    background: transparent;
+    border: 1px solid var(--border);
     border-radius: 10px;
-    color: var(--text);
+    color: var(--text-muted);
     padding: 9px 14px;
     cursor: pointer;
     font-family: 'Sora', sans-serif;
@@ -103,12 +103,53 @@
   }
 
   #new-chat-btn:hover {
-    background: rgba(124, 111, 247, 0.15);
-    border-color: rgba(124, 111, 247, 0.4);
-    box-shadow: 0 0 20px var(--accent-glow);
+    background: var(--sidebar-hover);
+    color: var(--text);
+    border-color: rgba(124, 111, 247, 0.25);
+  }
+
+  #new-chat-btn.active {
+    background: var(--accent-dim);
+    border-color: rgba(124, 111, 247, 0.35);
+    color: var(--text);
+    box-shadow: 0 0 16px var(--accent-glow);
   }
 
   #new-chat-btn svg { flex-shrink: 0; }
+
+  #channels-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-muted);
+    padding: 9px 14px;
+    cursor: pointer;
+    font-family: 'Sora', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.18s ease;
+    letter-spacing: 0.01em;
+    margin-top: 6px;
+  }
+
+  #channels-btn:hover {
+    background: var(--sidebar-hover);
+    color: var(--text);
+    border-color: rgba(124, 111, 247, 0.25);
+  }
+
+  #channels-btn.active {
+    background: var(--accent-dim);
+    border-color: rgba(124, 111, 247, 0.35);
+    color: var(--text);
+    box-shadow: 0 0 16px var(--accent-glow);
+  }
+
+  #channels-btn svg { flex-shrink: 0; }
 
   .sidebar-label {
     padding: 14px 16px 6px;
@@ -368,6 +409,18 @@
     opacity: 0.3;
     pointer-events: none;
     mask-image: radial-gradient(ellipse at center, black 0%, transparent 70%);
+  }
+
+  #chat-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #channel-view {
+    flex: 1;
+    overflow: hidden;
   }
 
   #messages {
@@ -649,6 +702,187 @@
     animation: fadeIn 0.2s ease;
     max-width: 360px;
   }
+
+  .channel-config-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 32px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .channel-config-view::-webkit-scrollbar { width: 4px; }
+  .channel-config-view::-webkit-scrollbar-track { background: transparent; }
+  .channel-config-view::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 99px; }
+
+  .channel-config-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+
+  .channel-config-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  .channel-config-icon.feishu { background: rgba(51, 112, 255, 0.15); color: #3370ff; }
+  .channel-config-icon.qq { background: rgba(18, 183, 245, 0.15); color: #12b7f5; }
+  .channel-config-icon.dingtalk { background: rgba(0, 122, 255, 0.15); color: #007aff; }
+  .channel-config-icon.default { background: var(--accent-dim); color: var(--accent); }
+
+  .channel-config-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .channel-config-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .channel-config-card {
+    background: var(--sidebar);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    max-width: 480px;
+  }
+
+  .channel-config-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .channel-config-row-label {
+    font-size: 14px;
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .channel-toggle {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    background: var(--text-dim);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .channel-toggle.on { background: #4ade80; }
+
+  .channel-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+  }
+
+  .channel-toggle.on::after { transform: translateX(16px); }
+
+  .channel-config-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .channel-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .channel-config-field-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .channel-config-input {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    width: 100%;
+  }
+
+  .channel-config-input:focus {
+    border-color: rgba(124, 111, 247, 0.4);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+
+  .channel-config-input::placeholder { color: var(--text-dim); }
+
+  .channel-config-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+  }
+
+  .channel-config-save {
+    padding: 9px 24px;
+    border-radius: 9px;
+    font-family: 'Sora', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .channel-config-save:hover {
+    background: #8f84f9;
+    box-shadow: 0 0 16px var(--accent-glow);
+  }
+
+  .channel-config-save:disabled {
+    background: var(--text-dim);
+    cursor: default;
+    box-shadow: none;
+  }
+
+  .channel-save-ok {
+    font-size: 12px;
+    color: #4ade80;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .channel-save-ok.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -659,16 +893,21 @@
       <div class="logo-icon">cx</div>
       <span class="logo-text">Code<span>x</span></span>
     </div>
-    <button id="new-chat-btn">
+    <button id="new-chat-btn" class="active">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
         <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
       </svg>
       新对话
     </button>
+    <button id="channels-btn">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M1.5 5h11M1.5 9h11M5 1.5l-1.5 11M10.5 1.5L9 12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+      频道
+    </button>
   </div>
 
   <div class="sidebar-label">对话历史</div>
-
   <div class="history-list" id="history-list"></div>
 
   <div class="sidebar-footer">
@@ -687,15 +926,16 @@
 </aside>
 
 <main id="main">
-  <div id="messages">
-    <div id="empty-state">
-      <div class="empty-icon">cx</div>
-      <div class="empty-title">Codex 已就绪</div>
-      <div class="empty-sub">向本地模型发送消息，开始你的对话</div>
+  <div id="chat-view">
+    <div id="messages">
+      <div id="empty-state">
+        <div class="empty-icon">cx</div>
+        <div class="empty-title">Codex 已就绪</div>
+        <div class="empty-sub">向本地模型发送消息，开始你的对话</div>
+      </div>
     </div>
-  </div>
 
-  <div id="input-area">
+    <div id="input-area">
     <div class="input-wrapper">
       <textarea id="chat-input" placeholder="发送消息..." rows="1"></textarea>
       <button id="send-btn" disabled>
@@ -706,6 +946,9 @@
     </div>
     <div class="input-hint"><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</div>
   </div>
+  </div>
+
+  <div id="channel-view" style="display:none;"></div>
 </main>
 
 <script>
@@ -870,7 +1113,7 @@
 
       items.forEach(function (s) {
         var item = document.createElement('div');
-        item.className = 'history-item' + (s.id === currentSessionId ? ' active' : '');
+        item.className = 'history-item' + (!isChannelView && s.id === currentSessionId ? ' active' : '');
         item.dataset.id = s.id;
 
         var dot = document.createElement('div');
@@ -918,6 +1161,7 @@
       var res = await fetch('/api/sessions', { method: 'POST' });
       var data = await res.json();
       currentSessionId = data.id;
+      showChatView();
       showEmptyState();
       inputEl.value = '';
       inputEl.style.height = 'auto';
@@ -938,6 +1182,8 @@
       }
       var data = await res.json();
       currentSessionId = id;
+
+      showChatView();
 
       messagesEl.innerHTML = '';
       if (data.messages.length === 0) {
@@ -1078,6 +1324,174 @@
       modelSwitcher.classList.remove('open');
     }
   });
+
+  const chatView = document.getElementById('chat-view');
+  const channelView = document.getElementById('channel-view');
+  const channelsBtn = document.getElementById('channels-btn');
+
+  const CHANNEL_META = {
+    feishu: { name: '飞书', icon: '飞', iconClass: 'feishu' },
+    qq:     { name: 'QQ',   icon: 'Q',  iconClass: 'qq' },
+    dingtalk: { name: '钉钉', icon: '钉', iconClass: 'dingtalk' },
+  };
+
+  function getChannelMeta(type) {
+    return CHANNEL_META[type] || { name: type, icon: type.charAt(0).toUpperCase(), iconClass: 'default' };
+  }
+
+  var channelsData = null;
+  var isChannelView = false;
+
+  function showChatView() {
+    isChannelView = false;
+    chatView.style.display = 'flex';
+    channelView.style.display = 'none';
+    channelsBtn.classList.remove('active');
+    newChatBtn.classList.add('active');
+    renderHistory();
+  }
+
+  function showChannelsPage() {
+    isChannelView = true;
+    chatView.style.display = 'none';
+    channelView.style.display = 'flex';
+    channelsBtn.classList.add('active');
+    newChatBtn.classList.remove('active');
+    renderHistory();
+    renderAllChannels();
+  }
+
+  channelsBtn.addEventListener('click', function () {
+    if (isChannelView) {
+      showChatView();
+    } else {
+      if (!channelsData) {
+        fetchChannels().then(function () { showChannelsPage(); });
+      } else {
+        showChannelsPage();
+      }
+    }
+  });
+
+  async function fetchChannels() {
+    try {
+      var res = await fetch('/api/channels');
+      channelsData = await res.json();
+    } catch (e) {
+      console.error('Failed to fetch channels:', e);
+    }
+  }
+
+  function renderAllChannels() {
+    channelView.innerHTML = '';
+    if (!channelsData || !channelsData.registered) return;
+
+    var wrapper = document.createElement('div');
+    wrapper.className = 'channel-config-view';
+
+    var header = document.createElement('div');
+    header.className = 'channel-config-header';
+    header.innerHTML =
+      '<div class="channel-config-icon default">' +
+        '<svg width="20" height="20" viewBox="0 0 14 14" fill="none"><path d="M1.5 5h11M1.5 9h11M5 1.5l-1.5 11M10.5 1.5L9 12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>' +
+      '</div>' +
+      '<div>' +
+        '<div class="channel-config-title">频道管理</div>' +
+        '<div class="channel-config-subtitle">配置和管理你的消息频道</div>' +
+      '</div>';
+    wrapper.appendChild(header);
+
+    channelsData.registered.forEach(function (type) {
+      var cfg = (channelsData.config && channelsData.config[type]) || {};
+      var meta = getChannelMeta(type);
+      var isOn = !!cfg.enabled;
+
+      var card = document.createElement('div');
+      card.className = 'channel-config-card';
+      card.style.marginBottom = '20px';
+      card.innerHTML =
+        '<div class="channel-config-row">' +
+          '<div style="display:flex;align-items:center;gap:10px">' +
+            '<div class="channel-config-icon ' + meta.iconClass + '" style="width:32px;height:32px;border-radius:8px;font-size:15px">' + escapeHtml(meta.icon) + '</div>' +
+            '<span class="channel-config-row-label">' + escapeHtml(meta.name) + '</span>' +
+          '</div>' +
+          '<button class="channel-toggle ' + (isOn ? 'on' : '') + '" id="ch-toggle-' + type + '"></button>' +
+        '</div>' +
+        '<div class="channel-config-fields">' +
+          '<div class="channel-config-field">' +
+            '<label class="channel-config-field-label">App ID</label>' +
+            '<input class="channel-config-input" id="ch-appid-' + type + '" value="' + escapeHtml(cfg.appId || '') + '" placeholder="输入 App ID" spellcheck="false">' +
+          '</div>' +
+          '<div class="channel-config-field">' +
+            '<label class="channel-config-field-label">App Secret</label>' +
+            '<input class="channel-config-input" id="ch-secret-' + type + '" type="password" value="' + escapeHtml(cfg.appSecret || '') + '" placeholder="输入 App Secret" spellcheck="false">' +
+          '</div>' +
+        '</div>' +
+        '<div class="channel-config-actions">' +
+          '<button class="channel-config-save" id="ch-save-' + type + '">保存</button>' +
+          '<span class="channel-save-ok" id="save-ok-' + type + '">' +
+            '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6.5l2.5 2.5L10 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+            '已保存' +
+          '</span>' +
+        '</div>';
+
+      wrapper.appendChild(card);
+    });
+
+    channelView.appendChild(wrapper);
+
+    channelsData.registered.forEach(function (type) {
+      var toggle = document.getElementById('ch-toggle-' + type);
+      toggle.addEventListener('click', function () { toggle.classList.toggle('on'); });
+
+      var saveBtn = document.getElementById('ch-save-' + type);
+      saveBtn.addEventListener('click', function () { saveChannel(type); });
+    });
+  }
+
+  async function saveChannel(type) {
+    var toggle = document.getElementById('ch-toggle-' + type);
+    var appIdInput = document.getElementById('ch-appid-' + type);
+    var appSecretInput = document.getElementById('ch-secret-' + type);
+    var saveBtn = document.getElementById('ch-save-' + type);
+
+    var payload = {
+      enabled: toggle.classList.contains('on'),
+      appId: appIdInput.value.trim(),
+      appSecret: appSecretInput.value.trim(),
+    };
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+
+    try {
+      var res = await fetch('/api/channels/' + type, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        var err = await res.json().catch(function () { return {}; });
+        showError(err.error || '保存失败');
+        return;
+      }
+
+      var updatedConfig = await res.json();
+      if (channelsData) {
+        channelsData.config = updatedConfig;
+      }
+
+      var okEl = document.getElementById('save-ok-' + type);
+      okEl.classList.add('show');
+      setTimeout(function () { okEl.classList.remove('show'); }, 2000);
+    } catch (e) {
+      showError('保存频道配置失败');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '保存';
+    }
+  }
 
   async function init() {
     await Promise.all([fetchSessions(), fetchModelConfig()]);
