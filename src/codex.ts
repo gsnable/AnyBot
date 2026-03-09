@@ -65,7 +65,7 @@ export async function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
   } = opts;
   const startedAt = Date.now();
 
-  const args = sessionId
+  const args: string[] = sessionId
     ? [
       "exec",
       "resume",
@@ -81,6 +81,10 @@ export async function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
       "-s",
       sandbox,
     ];
+
+  if (sessionId && sandbox === "danger-full-access") {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  }
 
   if (model) {
     args.push("-m", model);
