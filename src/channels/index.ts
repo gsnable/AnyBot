@@ -1,12 +1,14 @@
 import type { IChannel, ChannelCallbacks } from "./types.js";
 import { readChannelsConfig } from "./config.js";
 import { FeishuChannel } from "./feishu.js";
+import { QQBotChannel } from "./qqbot.js";
 import { logger } from "../logger.js";
 
 type ChannelFactory = () => IChannel;
 
 const channelFactories: Record<string, ChannelFactory> = {
   feishu: () => new FeishuChannel(),
+  qqbot: () => new QQBotChannel(),
 };
 
 export function getRegisteredChannelTypes(): string[] {

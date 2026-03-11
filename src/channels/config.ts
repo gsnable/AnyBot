@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ChannelsConfig, FeishuChannelConfig } from "./types.js";
+import type { ChannelsConfig, FeishuChannelConfig, QQBotChannelConfig } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.resolve(__dirname, "../../.data/channels.json");
@@ -16,6 +16,11 @@ const DEFAULT_CONFIG: ChannelsConfig = {
     botOpenId: "",
     ackReaction: "OK",
   } satisfies FeishuChannelConfig,
+  qqbot: {
+    enabled: false,
+    appId: "",
+    appSecret: "",
+  } satisfies QQBotChannelConfig,
 };
 
 function ensureConfig(): void {

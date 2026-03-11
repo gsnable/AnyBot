@@ -11,8 +11,15 @@ export interface FeishuChannelConfig extends ChannelConfig {
   ackReaction: string;
 }
 
+export interface QQBotChannelConfig extends ChannelConfig {
+  // qqbot 只需要基础的 enabled, appId, appSecret，已继承自 ChannelConfig
+  [key: string]: unknown;
+}
+
 export interface ChannelsConfig {
-  [channelType: string]: ChannelConfig;
+  [channelType: string]: ChannelConfig | undefined;
+  feishu?: FeishuChannelConfig;
+  qqbot?: QQBotChannelConfig;
 }
 
 export interface ChannelCallbacks {
