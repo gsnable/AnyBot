@@ -2,7 +2,7 @@
 
 把 AI CLI 工具变成可远程使用的 AI 助手——通过内置 **Web UI** 在浏览器里对话，或通过 **飞书机器人** / **QQ 机器人** / **Telegram 机器人** 在手机 / 桌面端随时向你这台机器上的 AI 发消息。
 
-目前支持 [OpenAI Codex CLI](https://github.com/openai/codex) 和 [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) 作为 Provider，架构已为接入更多 CLI 工具（Claude Code、Cursor CLI 等）做好准备。
+目前支持 [OpenAI Codex CLI](https://github.com/openai/codex)、[Google Gemini CLI](https://github.com/google-gemini/gemini-cli) 和 [Cursor CLI](https://docs.cursor.com/cli) 作为 Provider，架构已为接入更多 CLI 工具（Claude Code 等）做好准备。
 
 支持 **macOS** 和 **Linux**。
 
@@ -10,7 +10,7 @@
 
 ## 特性
 
-- **多 Provider 架构** — 可插拔的 AI CLI 后端，当前支持 Codex CLI 和 Gemini CLI，未来可扩展更多
+- **多 Provider 架构** — 可插拔的 AI CLI 后端，当前支持 Codex CLI、Gemini CLI 和 Cursor CLI，未来可扩展更多
 - **Web UI** — 开箱即用的本地聊天界面，支持 Markdown 渲染、代码高亮、会话管理
 - **多平台集成** — 同时支持飞书（长连接）、QQ 机器人（WebSocket）、Telegram，手机上也能用
 - **技能管理** — 在 Web UI 中浏览、启用 / 禁用 / 删除技能
@@ -38,6 +38,7 @@
 |----------|---------|------|
 | [Codex CLI](https://github.com/openai/codex) | `npm install -g @openai/codex` | OpenAI 的 CLI 工具 |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | 参见 [官方文档](https://github.com/google-gemini/gemini-cli) | Google 的 CLI 工具 |
+| [Cursor CLI](https://docs.cursor.com/cli) | Cursor 设置中启用 `agent` 命令 | Cursor 编辑器的 Agent CLI |
 
 <details>
 <summary><b>Linux 安装指南</b></summary>
@@ -85,7 +86,7 @@ sh setup.sh
 
 `setup.sh` 会引导你完成：
 - 检测操作系统与基础依赖（Node.js、npm）
-- **选择默认 Provider**（Codex CLI / Gemini CLI）
+- **选择默认 Provider**（Codex CLI / Gemini CLI / Cursor CLI）
 - 检测对应 CLI 是否已安装，并提供安装指引
 - 设置工作目录
 - 配置安全模式（Codex: Sandbox 模式 / Gemini: Approval Mode）
@@ -132,10 +133,10 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 |----------|------|---------|------|
 | `codex` | ✅ 可用 | [Codex CLI](https://github.com/openai/codex) | OpenAI 的 CLI，支持 Sandbox 模式 |
 | `gemini-cli` | ✅ 可用 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Google 的 CLI，支持会话续聊 |
+| `cursor-cli` | ✅ 可用 | [Cursor CLI](https://docs.cursor.com/cli) | Cursor 的 Agent CLI，支持会话续聊、Sandbox |
 | `claude-code` | 🔜 计划中 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic 的 CLI |
-| `cursor-cli` | 🔜 计划中 | Cursor CLI | Cursor 编辑器 CLI |
 
-通过环境变量 `PROVIDER=codex` 或 `PROVIDER=gemini-cli` 切换默认 Provider，也可在 Web UI 中随时切换。
+通过环境变量 `PROVIDER=codex`、`PROVIDER=gemini-cli` 或 `PROVIDER=cursor-cli` 切换默认 Provider，也可在 Web UI 中随时切换。
 
 ---
 
@@ -262,7 +263,7 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `PROVIDER` | `codex` | 使用的 Provider：`codex`、`gemini-cli` |
+| `PROVIDER` | `codex` | 使用的 Provider：`codex`、`gemini-cli`、`cursor-cli` |
 | `WEB_PORT` | `19981` | Web UI 端口 |
 | `LOG_LEVEL` | `info` | 日志级别：`debug` / `info` / `warn` / `error` |
 | `LOG_INCLUDE_CONTENT` | `false` | 日志中包含消息内容（调试用） |
@@ -285,6 +286,14 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 | `GEMINI_CLI_BIN` | `gemini` | Gemini CLI 可执行文件路径 |
 | `GEMINI_CLI_MODEL` | — | 覆盖使用的模型 |
 | `GEMINI_CLI_APPROVAL_MODE` | `yolo` | 操作审批模式：`yolo` / `auto-edit` / `confirm` |
+
+### Cursor CLI 配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CURSOR_CLI_BIN` | `agent` | Cursor Agent CLI 可执行文件路径 |
+| `CURSOR_CLI_WORKSPACE` | — | 工作区路径（可选，默认使用工作目录） |
+| `CURSOR_API_KEY` | — | API Key（可选，也可使用已登录的 Cursor 账号） |
 
 ---
 
@@ -337,7 +346,8 @@ AnyBot/
 │   │   ├── types.ts        # IProvider 接口定义
 │   │   ├── index.ts        # ProviderManager（工厂 + 注册）
 │   │   ├── codex.ts        # Codex CLI Provider 实现
-│   │   └── gemini-cli.ts   # Gemini CLI Provider 实现
+│   │   ├── gemini-cli.ts   # Gemini CLI Provider 实现
+│   │   └── cursor-cli.ts   # Cursor CLI Provider 实现
 │   ├── lark.ts             # 飞书 API（消息、文件、图片）
 │   ├── logger.ts           # 结构化日志
 │   ├── message.ts          # 消息解析（输入输出）
