@@ -18,7 +18,7 @@ import { logger } from "../logger.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MODELS_CACHE_TTL_MS = 30 * 60 * 1000;
-const MAX_TRANSIENT_RETRIES = 2;
+const MAX_TRANSIENT_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 1_000;
 
 const TRANSIENT_ERROR_PATTERNS = [
