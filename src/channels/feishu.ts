@@ -12,6 +12,7 @@ import {
 } from "../lark.js";
 import { parseIncomingText, sanitizeUserText } from "../message.js";
 import { includeContentInLogs, logger, rawLogString } from "../logger.js";
+import { handleCommand } from "./commands.js";
 
 import type * as Lark from "@larksuiteoapi/node-sdk";
 
@@ -212,9 +213,9 @@ export class FeishuChannel implements IChannel {
       return;
     }
 
-    if (userText === "/new") {
-      this.callbacks!.resetSession(message.chat_id, "feishu");
-      await sendText(client, message.chat_id, "新窗口已开启，我们可以继续聊天了");
+    const cmd = handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
+    if (cmd.handled) {
+      if (cmd.reply) await sendText(client, message.chat_id, cmd.reply);
       return;
     }
 

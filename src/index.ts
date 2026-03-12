@@ -15,7 +15,13 @@ import {
   logger,
   rawLogString,
 } from "./logger.js";
-import { getCurrentModel } from "./web/model-config.js";
+import {
+  getCurrentModel,
+  readModelConfig,
+  setCurrentProvider,
+  setCurrentModel,
+  getProviderTypes,
+} from "./web/model-config.js";
 import { startAllChannels } from "./channels/index.js";
 import type { ChannelCallbacks } from "./channels/index.js";
 import * as db from "./web/db.js";
@@ -211,10 +217,55 @@ async function generateReply(
 
 // --- Channel callbacks ---
 
+function listProviders() {
+  const config = readModelConfig();
+  return getProviderTypes().map((p) => ({
+    type: p.type,
+    displayName: p.displayName,
+    isCurrent: p.type === config.provider,
+  }));
+}
+
+function handleSwitchProvider(providerType: string) {
+  try {
+    const config = setCurrentProvider(providerType, getProviderConfig(providerType));
+    return {
+      success: true,
+      message: `已切换到 ${providerType}，当前模型: ${config.currentModel}`,
+    };
+  } catch (e: any) {
+    return { success: false, message: e.message || "切换供应商失败" };
+  }
+}
+
+function listModels() {
+  const config = readModelConfig();
+  return config.models.map((m) => ({
+    ...m,
+    isCurrent: m.id === config.currentModel,
+  }));
+}
+
+function handleSwitchModel(modelId: string) {
+  try {
+    const config = setCurrentModel(modelId);
+    return {
+      success: true,
+      message: `已切换到模型: ${config.currentModel}`,
+    };
+  } catch (e: any) {
+    return { success: false, message: e.message || "切换模型失败" };
+  }
+}
+
 const channelCallbacks: ChannelCallbacks = {
   generateReply: (chatId, userText, imagePaths, source) =>
     generateReply(chatId, userText, imagePaths, source),
   resetSession: resetChatSession,
+  listProviders,
+  switchProvider: handleSwitchProvider,
+  listModels,
+  switchModel: handleSwitchModel,
 };
 
 // --- Startup ---

@@ -2,6 +2,7 @@ import type { QQBotChannelConfig, IChannel, ChannelCallbacks } from "./types.js"
 import { readChannelConfig } from "./config.js";
 import { logger } from "../logger.js";
 import { sanitizeUserText } from "../message.js";
+import { handleCommand } from "./commands.js";
 import WebSocket from "ws";
 
 const QQ_OAUTH_URL = "https://bots.qq.com/app/getAppAccessToken";
@@ -198,9 +199,9 @@ export class QQBotChannel implements IChannel {
       return;
     }
 
-    if (userText === "/new") {
-      this.callbacks!.resetSession(chatId, "qqbot");
-      await this.sendText(chatId, message.id, "新窗口已开启，我们可以继续聊天了", eventType);
+    const cmd = handleCommand(userText, chatId, "qqbot", this.callbacks!);
+    if (cmd.handled) {
+      if (cmd.reply) await this.sendText(chatId, message.id, cmd.reply, eventType);
       return;
     }
 

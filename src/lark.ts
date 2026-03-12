@@ -116,7 +116,7 @@ function toInteractiveCardContent(text: string): string {
     header: {
       title: {
         tag: "plain_text",
-        content: "黑墙 回复",
+        content: "AnyBot 回复",
       },
       template: "blue",
     },

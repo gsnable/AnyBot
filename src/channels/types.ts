@@ -29,6 +29,19 @@ export interface ChannelsConfig {
   telegram?: TelegramChannelConfig;
 }
 
+export interface ProviderInfo {
+  type: string;
+  displayName: string;
+  isCurrent: boolean;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  description: string;
+  isCurrent: boolean;
+}
+
 export interface ChannelCallbacks {
   generateReply: (
     chatId: string,
@@ -37,6 +50,10 @@ export interface ChannelCallbacks {
     source?: string,
   ) => Promise<string>;
   resetSession: (chatId: string, source?: string) => void;
+  listProviders: () => ProviderInfo[];
+  switchProvider: (providerType: string) => { success: boolean; message: string };
+  listModels: () => ModelInfo[];
+  switchModel: (modelId: string) => { success: boolean; message: string };
 }
 
 export interface IChannel {

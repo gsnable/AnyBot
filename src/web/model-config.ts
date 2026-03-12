@@ -87,7 +87,10 @@ export function setCurrentModel(modelId: string): ModelConfig {
   return config;
 }
 
-export function setCurrentProvider(providerType: string): ModelConfig {
+export function setCurrentProvider(
+  providerType: string,
+  providerConfig?: Record<string, unknown>,
+): ModelConfig {
   const registered = getRegisteredProviderTypes();
   if (!registered.includes(providerType)) {
     throw new Error(`不支持的 Provider: ${providerType}。可用: ${registered.join(", ")}`);
@@ -97,7 +100,7 @@ export function setCurrentProvider(providerType: string): ModelConfig {
   config.lastSelected[config.provider] = config.currentModel;
   config.provider = providerType;
 
-  const newProvider = switchProvider(providerType);
+  const newProvider = switchProvider(providerType, providerConfig);
   config.models = newProvider.listModels();
   config.currentModel = config.lastSelected[providerType] || config.models[0]?.id || "";
 

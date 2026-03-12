@@ -6,6 +6,7 @@ import type { TelegramChannelConfig, IChannel, ChannelCallbacks } from "./types.
 import { readChannelConfig } from "./config.js";
 import { sanitizeUserText } from "../message.js";
 import { includeContentInLogs, logger, rawLogString } from "../logger.js";
+import { handleCommand } from "./commands.js";
 
 const shouldLogContent = includeContentInLogs();
 
@@ -225,10 +226,10 @@ export class TelegramChannel implements IChannel {
 
     if (!userText) return;
 
-    if (userText === "/new" || userText === "/reset" || userText === "/start") {
-      this.callbacks!.resetSession(chatId, "telegram");
+    const cmd = handleCommand(userText, chatId, "telegram", this.callbacks!);
+    if (cmd.handled) {
       this.enqueueChatTask(chatId, async () => {
-        await this.sendText(chatId, "新窗口已开启，我们可以继续聊天了");
+        if (cmd.reply) await this.sendReply(chatId, cmd.reply);
       });
       return;
     }
