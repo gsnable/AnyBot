@@ -18,6 +18,20 @@ import { logger } from "../logger.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MODELS_CACHE_TTL_MS = 30 * 60 * 1000;
+const MAX_TRANSIENT_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 1_000;
+
+const TRANSIENT_ERROR_PATTERNS = [
+  /TLS/i,
+  /socket disconnected/i,
+  /ECONNRESET/,
+  /ECONNREFUSED/,
+  /ETIMEDOUT/,
+  /EPIPE/,
+  /Connection lost/i,
+  /network socket/i,
+  /fetch failed/i,
+];
 
 interface CursorJsonOutput {
   type?: string;
@@ -116,8 +130,20 @@ export class CursorCliProvider implements IProvider {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
+      logger.info("provider.models.raw_output", {
+        provider: this.type,
+        rawOutput: output.slice(0, 2000),
+      });
+
       this.modelsCache = this.parseModelList(output);
       this.modelsCacheExpiry = Date.now() + MODELS_CACHE_TTL_MS;
+
+      logger.info("provider.models.parsed", {
+        provider: this.type,
+        count: this.modelsCache.length,
+        models: this.modelsCache.map((m) => m.id),
+      });
+
       return this.modelsCache;
     } catch (err) {
       logger.warn("provider.models.fetch_failed", {
@@ -129,6 +155,41 @@ export class CursorCliProvider implements IProvider {
   }
 
   async run(opts: RunOptions): Promise<RunResult> {
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+      try {
+        return await this.runOnce(opts, attempt);
+      } catch (err) {
+        lastError = err as Error;
+
+        if (err instanceof ProviderTimeoutError) throw err;
+
+        const isTransient = TRANSIENT_ERROR_PATTERNS.some((p) =>
+          p.test(err instanceof Error ? err.message : String(err)),
+        );
+
+        if (attempt < MAX_TRANSIENT_RETRIES && isTransient) {
+          const delay = RETRY_BASE_DELAY_MS * (attempt + 1);
+          logger.warn("provider.exec.transient_retry", {
+            provider: this.type,
+            attempt: attempt + 1,
+            maxRetries: MAX_TRANSIENT_RETRIES,
+            delayMs: delay,
+            error: lastError.message,
+          });
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    throw lastError!;
+  }
+
+  private async runOnce(opts: RunOptions, attempt: number): Promise<RunResult> {
     const {
       workdir,
       prompt,
@@ -156,6 +217,7 @@ export class CursorCliProvider implements IProvider {
       sessionId: sessionId || null,
       promptChars: prompt.length,
       timeoutMs,
+      attempt,
     });
 
     return new Promise((resolve, reject) => {
@@ -207,6 +269,7 @@ export class CursorCliProvider implements IProvider {
           workdir,
           sandbox,
           durationMs: Date.now() - startedAt,
+          attempt,
           error,
         });
         reject(error);
@@ -239,6 +302,7 @@ export class CursorCliProvider implements IProvider {
             stderrChars: stderr.length,
             stderrPreview: stderr.slice(0, 400),
             stdoutPreview: stdout.slice(0, 400),
+            attempt,
           });
           reject(new ProviderProcessError(code, stderr || stdout));
           return;
@@ -299,6 +363,7 @@ export class CursorCliProvider implements IProvider {
           sessionId: returnedSessionId,
           inputTokens: parsed.usage?.inputTokens,
           outputTokens: parsed.usage?.outputTokens,
+          attempt,
         });
 
         resolve({
@@ -324,7 +389,7 @@ export class CursorCliProvider implements IProvider {
       "--approve-mcps",
     ];
 
-    if (opts.model) {
+    if (opts.model && opts.model !== "auto") {
       args.push("--model", opts.model);
     }
 
