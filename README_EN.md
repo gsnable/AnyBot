@@ -36,9 +36,9 @@ Supports **macOS** and **Linux**.
 |:---:|:---:|
 | ![Provider Switching](assets/供应商.png) | ![Channel Management](assets/频道管理.png) |
 
-| Skill Management |
-|:---:|
-| ![Skill Management](assets/技能管理.png) |
+| Skill Management | Mobile Usage |
+|:---:|:---:|
+| ![Skill Management](assets/技能管理.png) | ![Mobile Usage](assets/手机端演示.png) |
 
 ---
 
