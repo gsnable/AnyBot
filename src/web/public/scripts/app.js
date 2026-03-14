@@ -893,6 +893,11 @@
                     '<input class="channel-drawer-input" id="ch-secret-' + type + '" type="password" value="' + escapeHtml(cfg.appSecret || '') + '" placeholder="输入 App Secret" spellcheck="false">' +
                     '</div>';
             }
+            fieldsHtml +=
+                '<div class="channel-drawer-field">' +
+                '<label class="channel-drawer-field-label">Owner Chat ID <span style="font-weight:400;color:var(--text-dim)">(私聊机器人后自动填入)</span></label>' +
+                '<input class="channel-drawer-input" id="ch-owner-' + type + '" value="' + escapeHtml(cfg.ownerChatId || '') + '" placeholder="私聊机器人一次即可自动记录" spellcheck="false">' +
+                '</div>';
 
             drawer.innerHTML =
                 '<div class="channel-drawer-header">' +
@@ -956,6 +961,10 @@
                 var appSecretInput = document.getElementById('ch-secret-' + type);
                 payload.appId = appIdInput.value.trim();
                 payload.appSecret = appSecretInput.value.trim();
+            }
+            var ownerInput = document.getElementById('ch-owner-' + type);
+            if (ownerInput) {
+                payload.ownerChatId = ownerInput.value.trim();
             }
 
             saveBtn.disabled = true;

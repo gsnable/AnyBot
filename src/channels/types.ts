@@ -2,6 +2,7 @@ export interface ChannelConfig {
   enabled: boolean;
   appId: string;
   appSecret: string;
+  ownerChatId?: string;
   [key: string]: unknown;
 }
 
@@ -12,13 +13,13 @@ export interface FeishuChannelConfig extends ChannelConfig {
 }
 
 export interface QQBotChannelConfig extends ChannelConfig {
-  // qqbot 只需要基础的 enabled, appId, appSecret，已继承自 ChannelConfig
   [key: string]: unknown;
 }
 
 export interface TelegramChannelConfig {
   enabled: boolean;
   token: string;
+  ownerChatId?: string;
   [key: string]: unknown;
 }
 
@@ -60,4 +61,5 @@ export interface IChannel {
   readonly type: string;
   start(callbacks: ChannelCallbacks): Promise<void>;
   stop(): Promise<void>;
+  sendToOwner(text: string): Promise<void>;
 }

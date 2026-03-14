@@ -2,7 +2,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import type { FeishuChannelConfig, IChannel, ChannelCallbacks } from "./types.js";
-import { readChannelConfig } from "./config.js";
+import { readChannelConfig, updateChannelConfig } from "./config.js";
 import {
   createLarkClients,
   sendText,
@@ -111,6 +111,17 @@ export class FeishuChannel implements IChannel {
     logger.info("feishu.stopped");
   }
 
+  async sendToOwner(text: string): Promise<void> {
+    if (!this.larkClient || !this.config) {
+      throw new Error("Feishu channel is not started");
+    }
+    const ownerChatId = this.config.ownerChatId;
+    if (!ownerChatId) {
+      throw new Error("Feishu ownerChatId 未配置，请先私聊机器人一次（会自动记录），或在设置中手动填写");
+    }
+    await sendReply(this.larkClient, ownerChatId, text, this.workdir);
+  }
+
   private shouldReplyInGroup(
     mentions: Array<{ id?: { open_id?: string } }> = [],
   ): boolean {
@@ -185,10 +196,14 @@ export class FeishuChannel implements IChannel {
       return;
     }
 
-    if (
-      message.chat_type === "group" ||
-      message.chat_type === "group_chat"
-    ) {
+    const isGroup = message.chat_type === "group" || message.chat_type === "group_chat";
+    if (!isGroup && !config.ownerChatId) {
+      config.ownerChatId = message.chat_id;
+      updateChannelConfig("feishu", { ownerChatId: message.chat_id });
+      logger.info("feishu.owner_auto_saved", { chatId: message.chat_id });
+    }
+
+    if (isGroup) {
       if (!this.shouldReplyInGroup(message.mentions)) return;
     }
 

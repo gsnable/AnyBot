@@ -1,5 +1,5 @@
 import type { QQBotChannelConfig, IChannel, ChannelCallbacks } from "./types.js";
-import { readChannelConfig } from "./config.js";
+import { readChannelConfig, updateChannelConfig } from "./config.js";
 import { logger } from "../logger.js";
 import { sanitizeUserText } from "../message.js";
 import { handleCommand } from "./commands.js";
@@ -171,6 +171,40 @@ export class QQBotChannel implements IChannel {
     });
   }
 
+  async sendToOwner(text: string): Promise<void> {
+    if (!this.config) {
+      throw new Error("QQBot channel is not started");
+    }
+    const ownerChatId = this.config.ownerChatId;
+    if (!ownerChatId) {
+      throw new Error("QQBot ownerChatId 未配置，请先私聊机器人一次（会自动记录），或在设置中手动填写");
+    }
+    try {
+      const token = await this.getValidToken();
+      const url = `${QQ_BASE_API}/v2/users/${ownerChatId}/messages`;
+      const body = { content: text, msg_type: 0 };
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `QQBot ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const responseData = await res.json();
+        logger.error("qqbot.send_to_owner.failed", { status: res.status, response: responseData });
+        throw new Error(`QQ send failed: HTTP ${res.status}`);
+      }
+      logger.info("qqbot.send_to_owner.success", { ownerChatId });
+    } catch (e) {
+      logger.error("qqbot.send_to_owner.error", { error: e });
+      throw e;
+    }
+  }
+
   private async handleMessage(message: any, eventType: string): Promise<void> {
     // 频道和单聊里的作者ID是不一样的字段结构
     let chatId = message.guild_id || message.channel_id || message.author?.id;
@@ -183,6 +217,13 @@ export class QQBotChannel implements IChannel {
     if (!chatId) {
         logger.warn("qqbot.message.no_chat_id", { message });
         return;
+    }
+
+    if (eventType === "C2C_MESSAGE_CREATE" && !this.config!.ownerChatId) {
+      const userId = message.author?.user_openid || chatId;
+      this.config!.ownerChatId = userId;
+      updateChannelConfig("qqbot", { ownerChatId: userId });
+      logger.info("qqbot.owner_auto_saved", { chatId: userId });
     }
 
     logger.info("qqbot.message.received", {

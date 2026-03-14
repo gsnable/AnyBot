@@ -47,6 +47,14 @@ class ChannelManager {
     return started;
   }
 
+  getChannel(type: string): IChannel | undefined {
+    return this.runningChannels.get(type);
+  }
+
+  getRunningChannelTypes(): string[] {
+    return Array.from(this.runningChannels.keys());
+  }
+
   async restartChannel(type: string): Promise<void> {
     if (!this.callbacks) {
       logger.warn("channel.restart_skipped", { type, reason: "no callbacks registered" });

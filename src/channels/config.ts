@@ -15,15 +15,18 @@ const DEFAULT_CONFIG: ChannelsConfig = {
     groupChatMode: "mention",
     botOpenId: "",
     ackReaction: "OK",
+    ownerChatId: "",
   } satisfies FeishuChannelConfig,
   qqbot: {
     enabled: false,
     appId: "",
     appSecret: "",
+    ownerChatId: "",
   } satisfies QQBotChannelConfig,
   telegram: {
     enabled: false,
     token: "",
+    ownerChatId: "",
   } satisfies TelegramChannelConfig,
 };
 

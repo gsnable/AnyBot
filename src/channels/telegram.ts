@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { TelegramChannelConfig, IChannel, ChannelCallbacks } from "./types.js";
-import { readChannelConfig } from "./config.js";
+import { readChannelConfig, updateChannelConfig } from "./config.js";
 import { sanitizeUserText } from "../message.js";
 import { includeContentInLogs, logger, rawLogString } from "../logger.js";
 import { handleCommand } from "./commands.js";
@@ -214,6 +214,12 @@ export class TelegramChannel implements IChannel {
     const chatId = String(message.chat.id);
     const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
 
+    if (!isGroup && !this.config!.ownerChatId) {
+      this.config!.ownerChatId = chatId;
+      updateChannelConfig("telegram", { ownerChatId: chatId });
+      logger.info("telegram.owner_auto_saved", { chatId });
+    }
+
     logger.info("telegram.message.received", {
       messageId: message.message_id,
       chatId,
@@ -344,6 +350,20 @@ export class TelegramChannel implements IChannel {
       remaining = remaining.slice(splitAt).trimStart();
     }
     return chunks;
+  }
+
+  async sendToOwner(text: string): Promise<void> {
+    if (!this.config) {
+      throw new Error("Telegram channel is not started");
+    }
+    const ownerChatId = this.config.ownerChatId;
+    if (!ownerChatId) {
+      throw new Error("Telegram ownerChatId 未配置，请先私聊机器人一次（会自动记录），或在设置中手动填写");
+    }
+    const chunks = this.splitMessage(text);
+    for (const chunk of chunks) {
+      await this.sendText(ownerChatId, chunk);
+    }
   }
 
   private async sendText(chatId: string, text: string): Promise<void> {
