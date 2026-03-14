@@ -16,6 +16,7 @@ Supports **macOS** and **Linux**.
 - **Web UI** — Built-in local chat interface with Markdown rendering, code highlighting, and session management
 - **Multi-Platform Integration** — Feishu (long connection), QQ Bot (WebSocket), and Telegram simultaneously — works on mobile too
 - **Skill Management** — Browse, enable/disable, and delete skills from the Web UI
+- **Proxy Configuration** — Configure HTTP / SOCKS5 proxies in the Web UI, with save and connectivity testing
 - **Session Continuity** — Reuses Provider's native sessions to preserve context; type `/new` to start fresh
 - **Image Understanding** — Send images for multimodal conversations
 - **File Delivery** — Generated images and files are automatically sent back to the chat
@@ -170,6 +171,7 @@ Built-in web chat interface, no extra deployment needed:
 - Provider and model switching
 - Channel configuration management (Feishu, QQ Bot, Telegram)
 - Skill management (browse, enable/disable, delete)
+- Proxy settings (HTTP / SOCKS5, auth, connectivity testing)
 - Dark theme
 
 ---
@@ -216,6 +218,10 @@ Channel configs are stored in `.data/channels.json`. Three ways to manage:
     "enabled": true,
     "appId": "your_app_id",
     "appSecret": "your_app_secret"
+  },
+  "telegram": {
+    "enabled": true,
+    "token": "1234567890:AA..."
   }
 }
 ```
@@ -256,6 +262,37 @@ Same as Feishu — configure via Web UI, REST API, or the `qqbot` field in `.dat
 
 ---
 
+## Telegram Integration
+
+Connected through the Telegram Bot API using long polling — **no webhook or public callback URL required**.
+
+### Telegram Setup
+
+1. Open [@BotFather](https://t.me/BotFather) in Telegram
+2. Run `/newbot` to create a bot
+3. Save the generated **Bot Token**
+4. If you want to use it in groups, add the bot to the group and @mention it in messages
+
+### Connection Configuration
+
+Like other channels, configure `telegram.token` through one of these methods:
+
+| Method | Description |
+|--------|-------------|
+| **Web UI** | Open the "Channels" page, choose Telegram, and enter the Bot Token |
+| **REST API** | `GET /api/channels` to view, `PUT /api/channels/telegram` to update |
+| **Manual Edit** | Edit the `telegram` field in `.data/channels.json` directly |
+
+### Usage
+
+- **Direct Message** — Message the bot directly
+- **Group Chat** — @mention the bot in a group before sending a message
+- **Image Messages** — Images are downloaded and passed to the Provider; captions are included as context
+- **Long Replies** — Replies longer than Telegram's message limit are automatically split into multiple messages
+- All chat commands supported (see [Chat Commands](#chat-commands) below)
+
+---
+
 ## Chat Commands
 
 All channels (Feishu, QQ, Telegram) support the following `/` commands:
@@ -291,6 +328,46 @@ After switching Providers, the skill list automatically switches to the correspo
 | `claude-code` | `~/.claude/` |
 | `cursor-cli` | `./.cursor/rules/` |
 | `qoder-cli` | `~/.qoder/agents/` |
+
+---
+
+## Proxy Configuration
+
+AnyBot supports centralized proxy settings in the Web UI for Provider requests, Telegram API calls, and other outbound HTTP(S) traffic.
+
+### Supported Capabilities
+
+- Supports `HTTP` and `SOCKS5` proxies
+- Supports optional username / password authentication
+- Supports one-click connectivity testing in the Web UI
+- Proxy settings are persisted in `.data/proxy.json`
+
+### Configuration Methods
+
+| Method | Description |
+|--------|-------------|
+| **Web UI** | Use the "Proxy" page in the left sidebar to enable, save, and test the connection |
+| **REST API** | `GET /api/proxy` to view, `PUT /api/proxy` to update, `POST /api/proxy/test` to test |
+| **Manual Edit** | Edit `.data/proxy.json` directly |
+
+### `proxy.json` Example
+
+```json
+{
+  "enabled": true,
+  "protocol": "http",
+  "host": "127.0.0.1",
+  "port": 7890,
+  "username": "",
+  "password": ""
+}
+```
+
+### Notes
+
+- Enabling the proxy updates global `HTTP_PROXY` / `HTTPS_PROXY`
+- `localhost`, `127.0.0.1`, `::1`, `*.feishu.cn`, `*.larksuite.com`, and `*.qq.com` are bypassed by default
+- This is useful when you want Codex / Gemini / Cursor / Qoder / Telegram to use the same local proxy
 
 ---
 
@@ -383,6 +460,9 @@ The Web UI communicates with the backend through these APIs, which can also be c
 | `PUT` | `/api/providers/current` | Switch Provider `{ "provider": "codex" }` |
 | `GET` | `/api/channels` | Get channel configuration |
 | `PUT` | `/api/channels/:type` | Update channel configuration |
+| `GET` | `/api/proxy` | Get proxy configuration |
+| `PUT` | `/api/proxy` | Update proxy configuration |
+| `POST` | `/api/proxy/test` | Test proxy connectivity |
 | `GET` | `/api/skills` | List skills |
 | `PUT` | `/api/skills/:id/toggle` | Enable/disable a skill `{ "enabled": true }` |
 | `DELETE` | `/api/skills/:id` | Delete a skill |
@@ -396,6 +476,7 @@ The Web UI communicates with the backend through these APIs, which can also be c
 - Session bindings are stored in SQLite; channel bindings are automatically rebuilt after process restart
 - Feishu messages receive a reaction (default ✅) to acknowledge receipt, then wait for the full Provider reply
 - QQ Bot receives messages via WebSocket gateway with automatic OAuth2 token management
+- When proxy is enabled, Provider and Telegram outbound requests go through the global proxy; Feishu, QQ, and local addresses bypass it by default
 - Text and image messages are supported; other message types receive a prompt
 - `/new` resets the current session, `/provider` and `/model` switch provider and model, `/help` shows command help
 - Image messages are downloaded to a temp directory and passed to the Provider
@@ -421,6 +502,7 @@ AnyBot/
 │   ├── lark.ts             # Feishu API (messages, files, images)
 │   ├── logger.ts           # Structured logging
 │   ├── message.ts          # Message parsing (input/output)
+│   ├── proxy.ts            # Global proxy application and env injection
 │   ├── prompt.ts           # System prompt builder
 │   ├── types.ts            # Type definitions
 │   ├── channels/           # Channel management
@@ -436,6 +518,7 @@ AnyBot/
 │   │   ├── api.ts          # REST API
 │   │   ├── db.ts           # SQLite persistence
 │   │   ├── model-config.ts # Provider + model configuration
+│   │   ├── proxy-config.ts # proxy.json read/write
 │   │   ├── skills.ts       # Skill management
 │   │   └── public/         # Frontend static files
 │   └── agent/              # Agent template files

@@ -16,6 +16,7 @@
 - **Web UI** — 开箱即用的本地聊天界面，支持 Markdown 渲染、代码高亮、会话管理
 - **多平台集成** — 同时支持飞书（长连接）、QQ 机器人（WebSocket）、Telegram，手机上也能用
 - **技能管理** — 在 Web UI 中浏览、启用 / 禁用 / 删除技能
+- **代理配置** — 在 Web UI 中配置 HTTP / SOCKS5 代理，支持保存与连通性测试
 - **会话续聊** — 复用 Provider 原生 session，上下文不丢失；输入 `/new` 开启新会话
 - **图片理解** — 发送图片，支持多模态对话
 - **文件回传** — 生成的图片、文件自动发送回聊天
@@ -170,6 +171,7 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 - Provider 和模型切换
 - 频道配置管理（飞书、QQ 机器人、Telegram）
 - 技能管理（浏览、启用 / 禁用、删除）
+- 代理设置（HTTP / SOCKS5、认证、连通性测试）
 - 深色主题
 
 ---
@@ -216,6 +218,10 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
     "enabled": true,
     "appId": "your_app_id",
     "appSecret": "your_app_secret"
+  },
+  "telegram": {
+    "enabled": true,
+    "token": "1234567890:AA..."
   }
 }
 ```
@@ -256,6 +262,37 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 
 ---
 
+## Telegram 集成
+
+通过 Telegram Bot API 长轮询接入，**无需 webhook 或公网回调地址**。
+
+### Telegram 侧配置
+
+1. 在 Telegram 中联系 [@BotFather](https://t.me/BotFather)
+2. 使用 `/newbot` 创建机器人
+3. 记录生成的 **Bot Token**
+4. 将机器人拉入群组后，如需群内使用，请在消息中 @ 机器人
+
+### 连接配置
+
+与其它频道相同，可通过以下方式配置 `telegram.token`：
+
+| 方式 | 说明 |
+|------|------|
+| **Web UI** | 在“频道”页面选择 Telegram，填写 Bot Token |
+| **REST API** | `GET /api/channels` 查看、`PUT /api/channels/telegram` 更新 |
+| **手动编辑** | 直接编辑 `.data/channels.json` 中的 `telegram` 字段 |
+
+### 使用方式
+
+- **私聊** — 直接给机器人发消息
+- **群聊** — 在群里 @ 机器人后发送消息
+- **图片消息** — 自动下载图片并交给 Provider 处理，caption 会一并作为上下文
+- **长回复拆分** — 超过 Telegram 单条消息长度时自动分段发送
+- 支持所有聊天命令（见下方[聊天命令](#聊天命令)）
+
+---
+
 ## 聊天命令
 
 所有频道（飞书、QQ、Telegram）统一支持以下 `/` 命令：
@@ -291,6 +328,46 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 | `claude-code` | `~/.claude/` |
 | `cursor-cli` | `./.cursor/rules/` |
 | `qoder-cli` | `~/.qoder/agents/` |
+
+---
+
+## 代理配置
+
+AnyBot 支持在 Web UI 中统一配置网络代理，适用于 Provider 请求、Telegram API 请求以及其它出站 HTTP(S) 请求。
+
+### 支持内容
+
+- 支持 `HTTP` 和 `SOCKS5` 代理
+- 支持可选用户名 / 密码认证
+- 支持在 Web UI 中一键测试代理连通性
+- 代理配置持久化保存到 `.data/proxy.json`
+
+### 配置方式
+
+| 方式 | 说明 |
+|------|------|
+| **Web UI** | 在左侧“代理”页面中启用、保存并测试连接 |
+| **REST API** | `GET /api/proxy` 查看、`PUT /api/proxy` 更新、`POST /api/proxy/test` 测试 |
+| **手动编辑** | 直接编辑 `.data/proxy.json` |
+
+### proxy.json 示例
+
+```json
+{
+  "enabled": true,
+  "protocol": "http",
+  "host": "127.0.0.1",
+  "port": 7890,
+  "username": "",
+  "password": ""
+}
+```
+
+### 说明
+
+- 启用后会更新全局 `HTTP_PROXY` / `HTTPS_PROXY`
+- 默认会直连 `localhost`、`127.0.0.1`、`::1`、`*.feishu.cn`、`*.larksuite.com`、`*.qq.com`
+- 很适合在本机开代理后，让 Codex / Gemini / Cursor / Qoder / Telegram 统一走代理
 
 ---
 
@@ -383,6 +460,9 @@ Web UI 通过以下 API 与后端交互，也可以直接调用：
 | `PUT` | `/api/providers/current` | 切换 Provider `{ "provider": "codex" }` |
 | `GET` | `/api/channels` | 获取频道配置 |
 | `PUT` | `/api/channels/:type` | 更新频道配置 |
+| `GET` | `/api/proxy` | 获取代理配置 |
+| `PUT` | `/api/proxy` | 更新代理配置 |
+| `POST` | `/api/proxy/test` | 测试代理连通性 |
 | `GET` | `/api/skills` | 获取技能列表 |
 | `PUT` | `/api/skills/:id/toggle` | 启用 / 禁用技能 `{ "enabled": true }` |
 | `DELETE` | `/api/skills/:id` | 删除技能 |
@@ -396,6 +476,7 @@ Web UI 通过以下 API 与后端交互，也可以直接调用：
 - 会话绑定关系保存在 SQLite 中；各频道的绑定在进程重启后自动重建
 - 飞书消息先加一个 reaction（默认 ✅）表示已收到，再等待 Provider 完整回复
 - QQ 机器人通过 WebSocket 网关接收消息，OAuth2 自动管理 Token
+- 启用代理后，Provider 与 Telegram 等出站请求会走全局代理；飞书、QQ 和本机地址默认直连
 - 支持文本和图片消息；其它消息类型会收到提示
 - `/new` 重置当前会话，`/provider` 和 `/model` 切换供应商和模型，`/help` 查看命令帮助
 - 图片消息先下载到临时目录，通过 Provider 传入
@@ -421,6 +502,7 @@ AnyBot/
 │   ├── lark.ts             # 飞书 API（消息、文件、图片）
 │   ├── logger.ts           # 结构化日志
 │   ├── message.ts          # 消息解析（输入输出）
+│   ├── proxy.ts            # 全局代理应用与环境变量注入
 │   ├── prompt.ts           # 系统提示词构建
 │   ├── types.ts            # 类型定义
 │   ├── channels/           # 频道管理
@@ -436,6 +518,7 @@ AnyBot/
 │   │   ├── api.ts          # REST API
 │   │   ├── db.ts           # SQLite 持久化
 │   │   ├── model-config.ts # Provider + 模型配置
+│   │   ├── proxy-config.ts # proxy.json 读写
 │   │   ├── skills.ts       # 技能管理
 │   │   └── public/         # 前端静态文件
 │   └── agent/              # Agent 模板文件
