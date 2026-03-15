@@ -22,27 +22,30 @@ function getSystemPrompt(): string {
   });
 }
 
-export const outputContract = [
-  "只回复当前这条用户消息。",
-  "如果需要发送图片给用户，在回复中包含图片绝对路径或 Markdown 图片语法 ![描述](/绝对路径.png)。相对路径基于工作目录解析。",
-  "如果需要发送非图片文件，每个文件单独一行，格式：FILE: /绝对路径/文件名.扩展名。",
-].join("\n");
+function buildOutputContract(source: string): string {
+  return [
+    `当前消息来自：${source}客户端`,
+    "只回复当前这条用户消息。",
+    "如果需要发送图片给用户，在回复中包含图片绝对路径或 Markdown 图片语法 ![描述](/绝对路径.png)。相对路径基于工作目录解析。",
+    "如果需要发送非图片文件，每个文件单独一行，格式：FILE: /绝对路径/文件名.扩展名。",
+  ].join("\n");
+}
 
-export function buildFirstTurnPrompt(userText: string): string {
+export function buildFirstTurnPrompt(userText: string, source: string = "web"): string {
   return `${getSystemPrompt()}
 
 输出要求：
-${outputContract}
+${buildOutputContract(source)}
 
 用户消息：
 ${userText}`;
 }
 
-export function buildResumePrompt(userText: string): string {
+export function buildResumePrompt(userText: string, source: string = "web"): string {
   return `${userText}
 
 补充要求：
-${outputContract}`;
+${buildOutputContract(source)}`;
 }
 
 export function generateId(): string {

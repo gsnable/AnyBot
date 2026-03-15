@@ -165,8 +165,8 @@ async function generateReply(
   const sessionId = sessionIdByChat.get(chatId);
   const sessionGeneration = getSessionGeneration(chatId);
   const prompt = sessionId
-    ? buildResumePrompt(userText)
-    : buildFirstTurnPrompt(userText);
+    ? buildResumePrompt(userText, source)
+    : buildFirstTurnPrompt(userText, source);
 
   const dbSession = getOrCreateChannelSession(source, chatId);
   db.addMessage(dbSession.id, "user", userText);
