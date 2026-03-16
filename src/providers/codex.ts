@@ -74,15 +74,21 @@ export class CodexProvider implements IProvider {
       sessionId,
       timeoutMs = DEFAULT_TIMEOUT_MS,
     } = opts;
-    const sandbox = opts.sandbox ?? "read-only";
+    const sandbox = opts.sandbox ?? process.env.CODEX_SANDBOX ?? "read-only";
     const startedAt = Date.now();
 
     const args: string[] = sessionId
       ? ["exec", "resume", "--json", "--skip-git-repo-check"]
       : ["exec", "--json", "--skip-git-repo-check", "-C", workdir, "-s", sandbox];
 
-    if (sessionId && sandbox === "danger-full-access") {
-      args.push("--dangerously-bypass-approvals-and-sandbox");
+    // resume 模式不支持 -s，需要用其他方式传递沙箱权限
+    if (sessionId) {
+      if (sandbox === "danger-full-access") {
+        args.push("--dangerously-bypass-approvals-and-sandbox");
+      } else if (sandbox === "workspace-write") {
+        // --full-auto 等价于 --sandbox workspace-write
+        args.push("--full-auto");
+      }
     }
 
     if (model) {
