@@ -34,7 +34,7 @@ export class ProviderParseError extends Error {
     }
 }
 
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = parseInt(process.env.PROVIDER_TIMEOUT_MS || "600000", 10);
 
 export class CodexProvider implements IProvider {
     readonly type = "codex";

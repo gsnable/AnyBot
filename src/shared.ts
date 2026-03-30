@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { SandboxMode } from "./types.js";
 import { sandboxModes } from "./types.js";
 import { buildSystemPrompt } from "./prompt.js";
@@ -13,6 +15,9 @@ if (!sandboxModes.includes(sandboxRaw as SandboxMode)) {
 }
 
 const sandbox = sandboxRaw as SandboxMode;
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const anybotDataDir = path.resolve(__dirname, "../.data");
 
 function getSystemPrompt(): string {
   return buildSystemPrompt({
@@ -59,6 +64,10 @@ export function generateTitle(text: string): string {
 
 export function getWorkdir(): string {
   return workdir;
+}
+
+export function getDataDir(): string {
+  return anybotDataDir;
 }
 
 export function getSandbox(): SandboxMode {

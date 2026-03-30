@@ -29,6 +29,7 @@ import {
   generateId,
   generateTitle,
   getWorkdir,
+  getDataDir,
   getSandbox,
 } from "../shared.js";
 
@@ -449,6 +450,27 @@ export function chatRouter(): Router {
       ? buildResumePrompt(userText)
       : buildFirstTurnPrompt(userText);
 
+    // 统一图片存储逻辑：将 Web 上传的图片备份到持久化目录
+    const persistentImagePaths: string[] = [];
+    const mediaDir = path.join(getDataDir(), "media", id); // 使用 Web 会话 ID 作为目录名
+    try {
+      if (imagePaths.length > 0) {
+        await fs.promises.mkdir(mediaDir, { recursive: true }).catch(() => {});
+        for (const imgPath of imagePaths) {
+          const fileName = path.basename(imgPath);
+          const newPath = path.join(mediaDir, fileName);
+          await fs.promises.copyFile(imgPath, newPath);
+          persistentImagePaths.push(newPath);
+          // 备份成功后，删除临时文件以节省空间
+          if (imgPath.includes("/tmp/")) {
+            await fs.promises.unlink(imgPath).catch(() => {});
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn("web.image.backup_failed", { id, error: e });
+    }
+
     try {
       const provider = getProvider();
       logger.info("web.chat.start", {
@@ -465,7 +487,7 @@ export function chatRouter(): Router {
         sandbox: getSandbox(),
         model: getCurrentModel(),
         prompt,
-        imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
+        imagePaths: persistentImagePaths.length > 0 ? persistentImagePaths : undefined,
         sessionId: session.sessionId || undefined,
       });
 

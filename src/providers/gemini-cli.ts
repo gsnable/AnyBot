@@ -14,7 +14,7 @@ import {
 } from "./codex.js";
 import { logger } from "../logger.js";
 
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = parseInt(process.env.PROVIDER_TIMEOUT_MS || "600000", 10);
 
 interface GeminiJsonOutput {
   response?: string;
@@ -26,12 +26,19 @@ interface GeminiJsonOutput {
   };
 }
 
+export class ProviderSessionNotFoundError extends Error {
+  constructor(sessionId: string) {
+    super(`Session not found: ${sessionId}`);
+    this.name = "ProviderSessionNotFoundError";
+  }
+}
+
 export class GeminiCliProvider implements IProvider {
   readonly type = "gemini-cli";
   readonly displayName = "Gemini CLI";
   readonly capabilities: ProviderCapabilities = {
     sessionResume: true,
-    imageInput: false,
+    imageInput: true,
     sandbox: false,
   };
 
@@ -58,12 +65,20 @@ export class GeminiCliProvider implements IProvider {
       prompt,
       model,
       sessionId,
+      imagePaths = [],
       timeoutMs = DEFAULT_TIMEOUT_MS,
     } = opts;
     const startedAt = Date.now();
 
+    // 将图片路径转换为 @ 语法并追加到 Prompt
+    let finalPrompt = prompt;
+    if (imagePaths.length > 0) {
+      const imageAttachments = imagePaths.map(p => `@'${p}'`).join(" ");
+      finalPrompt = `${prompt} ${imageAttachments}`;
+    }
+
     const args: string[] = [
-      "-p", prompt,
+      "-p", finalPrompt,
       "--output-format", "json",
       "--approval-mode", this.approvalMode,
     ];
@@ -161,13 +176,24 @@ export class GeminiCliProvider implements IProvider {
             stderrPreview: stderr.slice(0, 400),
             stdoutPreview: stdout.slice(0, 400),
           });
+          
+          // 如果是 ID 不存在导致的退出，抛出特定异常以触发重试逻辑
+          if (code === 42 && sessionId && stderr.includes("Invalid session identifier")) {
+            reject(new ProviderSessionNotFoundError(sessionId));
+            return;
+          }
+
           reject(new ProviderProcessError(code, stderr || stdout));
           return;
         }
 
         let parsed: GeminiJsonOutput;
         try {
-          parsed = JSON.parse(stdout.trim()) as GeminiJsonOutput;
+          // 容错处理：Gemini CLI 可能会在正式 JSON 前输出非 JSON 的日志/警告信息
+          // 我们使用正则表达式抓取第一个 { 和最后一个 } 之间的内容
+          const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+          const jsonStr = jsonMatch ? jsonMatch[0] : stdout.trim();
+          parsed = JSON.parse(jsonStr) as GeminiJsonOutput;
         } catch {
           logger.error("provider.exec.parse_error", {
             provider: this.type,

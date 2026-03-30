@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
-import type { ReplyPayload, TextMessageContent, ImageMessageContent } from "./types.js";
+import type { ReplyPayload, TextMessageContent, ImageMessageContent, FileMessageContent } from "./types.js";
 
 export function parseIncomingText(content: string): string {
   try {
@@ -20,6 +20,18 @@ export function parseIncomingImageKey(content: string): string | null {
   try {
     const parsed = JSON.parse(content) as ImageMessageContent;
     return parsed.image_key?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseIncomingFileKey(content: string): { key: string; name: string } | null {
+  try {
+    const parsed = JSON.parse(content) as FileMessageContent;
+    if (parsed.file_key && parsed.file_name) {
+      return { key: parsed.file_key.trim(), name: parsed.file_name.trim() };
+    }
+    return null;
   } catch {
     return null;
   }

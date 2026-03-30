@@ -68,7 +68,7 @@ export type {
   ProviderConfig,
 } from "./types.js";
 export { CodexProvider } from "./codex.js";
-export { GeminiCliProvider } from "./gemini-cli.js";
+export { GeminiCliProvider, ProviderSessionNotFoundError } from "./gemini-cli.js";
 export { CursorCliProvider } from "./cursor-cli.js";
 export { QoderCliProvider } from "./qoder-cli.js";
 export {

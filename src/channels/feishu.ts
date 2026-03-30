@@ -9,10 +9,12 @@ import {
   sendReply,
   sendAckReaction,
   downloadImageFromMessage,
+  downloadFileFromMessage,
 } from "../lark.js";
 import { parseIncomingText, sanitizeUserText } from "../message.js";
 import { includeContentInLogs, logger, rawLogString } from "../logger.js";
 import { handleCommand } from "./commands.js";
+import { getWorkdir, getDataDir } from "../shared.js";
 
 import type * as Lark from "@larksuiteoapi/node-sdk";
 
@@ -49,7 +51,6 @@ export class FeishuChannel implements IChannel {
   private callbacks: ChannelCallbacks | null = null;
   private handledMessageIds = new CappedSet<string>(MAX_HANDLED_IDS);
   private queueByChat = new Map<string, Promise<void>>();
-  private workdir = process.env.CODEX_WORKDIR || process.cwd();
   private startedAtMs: number = 0;
 
   async start(callbacks: ChannelCallbacks): Promise<void> {
@@ -98,46 +99,28 @@ export class FeishuChannel implements IChannel {
 
   async stop(): Promise<void> {
     if (this.wsClient) {
-      try {
-        this.wsClient.close({ force: true });
-      } catch (error) {
-        logger.warn("feishu.ws_close_failed", { error });
-      }
+      await this.wsClient.stop();
+      this.wsClient = null;
     }
-    this.wsClient = null;
     this.larkClient = null;
-    this.callbacks = null;
     this.config = null;
-    logger.info("feishu.stopped");
+    this.callbacks = null;
   }
 
   async sendToOwner(text: string): Promise<void> {
-    if (!this.larkClient || !this.config) {
-      throw new Error("Feishu channel is not started");
+    if (!this.larkClient || !this.config?.ownerChatId) {
+      throw new Error("Feishu channel not ready or ownerChatId not set");
     }
-    const ownerChatId = this.config.ownerChatId;
-    if (!ownerChatId) {
-      throw new Error("Feishu ownerChatId 未配置，请先私聊机器人一次（会自动记录），或在设置中手动填写");
-    }
-    await sendReply(this.larkClient, ownerChatId, text, this.workdir);
+    await sendText(this.larkClient, this.config.ownerChatId, text);
   }
 
-  private shouldReplyInGroup(
-    mentions: Array<{ id?: { open_id?: string } }> = [],
-  ): boolean {
-    if (!this.config) return false;
-    if (this.config.groupChatMode === "all") return true;
-    if (this.config.botOpenId) {
-      return mentions.some((m) => m.id?.open_id === this.config!.botOpenId);
-    }
-    return mentions.length > 0;
-  }
-
-  private enqueueChatTask(chatId: string, task: () => Promise<void>): void {
-    const previous = this.queueByChat.get(chatId) || Promise.resolve();
-    const next = previous
-      .catch(() => undefined)
+  private enqueueChatTask(chatId: string, task: () => Promise<void>) {
+    const prev = this.queueByChat.get(chatId) || Promise.resolve();
+    const next = prev
       .then(task)
+      .catch((error) => {
+        logger.error("feishu.chat_task_failed", { chatId, error });
+      })
       .finally(() => {
         if (this.queueByChat.get(chatId) === next) {
           this.queueByChat.delete(chatId);
@@ -191,8 +174,8 @@ export class FeishuChannel implements IChannel {
     if (this.handledMessageIds.has(message.message_id)) return;
     this.handledMessageIds.add(message.message_id);
 
-    if (message.message_type !== "text" && message.message_type !== "image") {
-      await sendText(client, message.chat_id, "目前只支持文本和图片消息。");
+    if (message.message_type !== "text" && message.message_type !== "image" && message.message_type !== "file") {
+      await sendText(client, message.chat_id, "目前只支持文本、图片和文件消息。");
       return;
     }
 
@@ -209,6 +192,11 @@ export class FeishuChannel implements IChannel {
 
     if (message.message_type === "image") {
       void this.processImageMessage(client, config, message);
+      return;
+    }
+
+    if (message.message_type === "file") {
+      void this.processFileMessage(client, config, message);
       return;
     }
 
@@ -251,14 +239,15 @@ export class FeishuChannel implements IChannel {
           undefined,
           "feishu",
         );
-        await sendReply(client, message.chat_id, reply, this.workdir);
+        await sendReply(client, message.chat_id, reply, getWorkdir());
       } catch (error) {
         logger.error("feishu.text.failed", {
           messageId: message.message_id,
           chatId: message.chat_id,
           error,
         });
-        await sendText(client, message.chat_id, "处理消息时出错了，请稍后再试。");
+        const { formatProviderError } = await import("../index.js");
+        await sendText(client, message.chat_id, formatProviderError(error));
       }
     });
   }
@@ -286,7 +275,8 @@ export class FeishuChannel implements IChannel {
 
     this.enqueueChatTask(message.chat_id, async () => {
       try {
-        imagePath = await downloadImageFromMessage(client, message);
+        const mediaDir = path.join(getDataDir(), "media", message.chat_id);
+        imagePath = await downloadImageFromMessage(client, message, mediaDir);
         const userText =
           "用户发来了一张图片。请先根据图片内容直接回答；如果缺少上下文，就先简要描述图片里有什么，并询问对方希望你进一步做什么。";
         const reply = await this.callbacks!.generateReply(
@@ -295,26 +285,71 @@ export class FeishuChannel implements IChannel {
           [imagePath],
           "feishu",
         );
-        await sendReply(client, message.chat_id, reply, this.workdir);
+        await sendReply(client, message.chat_id, reply, getWorkdir());
       } catch (error) {
         logger.error("feishu.image.failed", {
           messageId: message.message_id,
           chatId: message.chat_id,
           error,
         });
-        await sendText(
-          client,
-          message.chat_id,
-          "图片收到了，但处理失败。请确认机器人有读取图片资源的权限后再试。",
-        );
-      } finally {
-        if (imagePath) {
-          await rm(path.dirname(imagePath), {
-            recursive: true,
-            force: true,
-          }).catch(() => {});
-        }
+        const { formatProviderError } = await import("../index.js");
+        await sendText(client, message.chat_id, formatProviderError(error));
       }
     });
+  }
+
+  private async processFileMessage(
+    client: Lark.Client,
+    config: FeishuChannelConfig,
+    message: {
+      message_id: string;
+      chat_id: string;
+      message_type: string;
+      content: string;
+    },
+  ): Promise<void> {
+    try {
+      await sendAckReaction(client, message.message_id, config.ackReaction);
+    } catch (error) {
+      logger.warn("feishu.ack_failed", {
+        messageId: message.message_id,
+        error,
+      });
+    }
+
+    let filePath: string | null = null;
+
+    this.enqueueChatTask(message.chat_id, async () => {
+      try {
+        const mediaDir = path.join(getDataDir(), "media", message.chat_id);
+        filePath = await downloadFileFromMessage(client, message, mediaDir);
+        const fileName = path.basename(filePath);
+        const userText = `用户发来了一个文件：${fileName}。请读取并分析该文件的内容，并回答用户的问题。`;
+        
+        // 我们将文件路径放入 imagePaths 数组中，因为 gemini-cli 会统一处理这些路径为 @ 语法
+        const reply = await this.callbacks!.generateReply(
+          message.chat_id,
+          userText,
+          [filePath],
+          "feishu",
+        );
+        await sendReply(client, message.chat_id, reply, getWorkdir());
+      } catch (error) {
+        logger.error("feishu.file.failed", {
+          messageId: message.message_id,
+          chatId: message.chat_id,
+          error,
+        });
+        const { formatProviderError } = await import("../index.js");
+        await sendText(client, message.chat_id, formatProviderError(error));
+      }
+    });
+  }
+
+  private shouldReplyInGroup(mentions?: Array<{ id?: { open_id?: string } }>): boolean {
+    if (this.config?.groupChatMode === "always") return true;
+    if (this.config?.groupChatMode === "never") return false;
+    // mention 模式
+    return !!mentions?.some((m) => m.id?.open_id === this.config?.botOpenId);
   }
 }

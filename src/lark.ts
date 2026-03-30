@@ -1,11 +1,11 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { createReadStream } from "node:fs";
-import { mkdtemp, stat } from "node:fs/promises";
+import { mkdtemp, stat, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { IncomingMessage } from "./types.js";
-import { parseIncomingImageKey, getImageExtension, parseReplyPayload } from "./message.js";
+import { parseIncomingImageKey, parseIncomingFileKey, getImageExtension, parseReplyPayload } from "./message.js";
 import { includeContentInLogs, logger, rawLogString } from "./logger.js";
 
 const shouldLogContent = includeContentInLogs();
@@ -373,6 +373,7 @@ export async function sendAckReaction(
 export async function downloadImageFromMessage(
   client: Lark.Client,
   message: IncomingMessage,
+  storageDir?: string,
 ): Promise<string> {
   const imageKey = parseIncomingImageKey(message.content);
   if (!imageKey) {
@@ -393,13 +394,16 @@ export async function downloadImageFromMessage(
     params: { type: "image" },
   });
 
-  const tempDir = await mkdtemp(path.join(tmpdir(), "codex-feishu-image-"));
+  // 确定存储目录，如果没有传入则使用临时目录
+  const finalDir = storageDir || await mkdtemp(path.join(tmpdir(), "codex-feishu-image-"));
+  await mkdir(finalDir, { recursive: true }).catch(() => {});
+
   const contentType =
     response.headers?.["content-type"] || response.headers?.["Content-Type"];
-  const filePath = path.join(
-    tempDir,
-    `incoming${getImageExtension(Array.isArray(contentType) ? contentType[0] : contentType)}`,
-  );
+  
+  // 使用 message_id 命名，确保同一张图不会重复下载
+  const fileName = `${message.message_id}${getImageExtension(Array.isArray(contentType) ? contentType[0] : contentType)}`;
+  const filePath = path.join(finalDir, fileName);
 
   await response.writeFile(filePath);
   logger.info("lark.download_image.success", {
@@ -407,7 +411,46 @@ export async function downloadImageFromMessage(
     chatId: message.chat_id,
     imageKey,
     filePath,
-    contentType: Array.isArray(contentType) ? contentType[0] : contentType,
+  });
+  return filePath;
+}
+
+export async function downloadFileFromMessage(
+  client: Lark.Client,
+  message: IncomingMessage,
+  storageDir?: string,
+): Promise<string> {
+  const fileInfo = parseIncomingFileKey(message.content);
+  if (!fileInfo) {
+    throw new Error(`无法解析文件消息内容：${message.content}`);
+  }
+
+  logger.info("lark.download_file.start", {
+    messageId: message.message_id,
+    chatId: message.chat_id,
+    fileKey: fileInfo.key,
+    fileName: fileInfo.name,
+  });
+
+  const response = await client.im.messageResource.get({
+    path: {
+      message_id: message.message_id,
+      file_key: fileInfo.key,
+    },
+    params: { type: "file" },
+  });
+
+  const finalDir = storageDir || (await mkdtemp(path.join(tmpdir(), "codex-feishu-file-")));
+  await mkdir(finalDir, { recursive: true }).catch(() => {});
+
+  const filePath = path.join(finalDir, fileInfo.name);
+
+  await response.writeFile(filePath);
+  logger.info("lark.download_file.success", {
+    messageId: message.message_id,
+    chatId: message.chat_id,
+    fileKey: fileInfo.key,
+    filePath,
   });
   return filePath;
 }
