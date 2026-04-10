@@ -436,11 +436,23 @@ export function chatRouter(): Router {
       }
     }
 
-    // 构建 metadata（附件信息：名称 + 路径）
-    const attachmentInfo = (attachments || []).map(a => ({ name: a.name, path: a.path }));
-    const metadata = attachmentInfo.length > 0 ? JSON.stringify({ attachments: attachmentInfo }) : null;
-
-    db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
+    // 指令拦截处理
+    const trimmedContent = (content || "").trim();
+    if (trimmedContent.startsWith("/")) {
+      if (trimmedContent === "/stop" || trimmedContent === "/kill") {
+        const provider = getProvider();
+        if (provider.stop) await provider.stop(id);
+        res.json({ role: "assistant", content: "已尝试停止当前正在运行的任务。", title: session.title });
+        return;
+      }
+      if (trimmedContent === "/reset" || trimmedContent === "/new") {
+        const provider = getProvider();
+        if (provider.stop) await provider.stop(id);
+        db.detachChatId("web", id); // 模拟重置
+        res.json({ role: "assistant", content: "会话已重置，之前的进程已停止，您可以开始新对话了。", title: session.title });
+        return;
+      }
+    }
 
     if (session.messages.length <= 1) {
       session.title = generateTitle(content?.trim() || "文件分析");
@@ -471,6 +483,11 @@ export function chatRouter(): Router {
       logger.warn("web.image.backup_failed", { id, error: e });
     }
 
+    // 在搬迁完成后，使用持久化路径构建 metadata 并存入数据库
+    const attachmentsForDb = persistentImagePaths.map(p => ({ name: path.basename(p), path: p }));
+    const metadata = attachmentsForDb.length > 0 ? JSON.stringify({ attachments: attachmentsForDb }) : null;
+    db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
+
     try {
       const provider = getProvider();
       logger.info("web.chat.start", {
@@ -482,13 +499,54 @@ export function chatRouter(): Router {
         fileCount: filePaths.length,
       });
 
-      const result = await provider.run({
+      let result = await provider.run({
         workdir: getWorkdir(),
         sandbox: getSandbox(),
         model: getCurrentModel(),
         prompt,
+        chatId: id,
         imagePaths: persistentImagePaths.length > 0 ? persistentImagePaths : undefined,
         sessionId: session.sessionId || undefined,
+      }).catch(async (error) => {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const isSessionNotFound = errorMsg.includes("Session not found") || (error as any).name === "ProviderSessionNotFoundError";
+
+        if (isSessionNotFound) {
+          logger.warn("web.session_not_found_retry_triggered", { sessionId: session.id, oldProviderSessionId: session.sessionId, errorMsg });
+          
+          const historyMessages = session.messages.slice(0, -1);
+          logger.info("web.retry.history_extracted", { count: historyMessages.length });
+          
+          const historyText = historyMessages.map(m => 
+            `${m.role === "user" ? "用户" : "Gemini"}: ${m.content}`
+          ).join("\n");
+
+          const reconstructedPrompt = `SYSTEM: 你是一个具备持久记忆的助手。以下是由于系统重启而恢复的历史对话记录，请基于此背景继续回答用户的新问题。
+
+HISTORY:
+${historyText}
+
+CURRENT_QUESTION:
+${userText}`;
+
+          // 这里我们传入一个虚拟的 sendProgress，因为 Web API 目前不支持中途回话
+          const dummyCallbacks: any = {
+            sendProgress: async (cid: string, msg: string) => {
+              logger.info("web.chat.progress_skipped", { cid, msg });
+            }
+          };
+
+          return await provider.run({
+            workdir: getWorkdir(),
+            sandbox: getSandbox(),
+            model: getCurrentModel(),
+            prompt: reconstructedPrompt,
+            chatId: id,
+            imagePaths: persistentImagePaths.length > 0 ? persistentImagePaths : undefined,
+            sessionId: undefined,
+          });
+        }
+        throw error;
       });
 
       const providerSessionId = result.sessionId || session.sessionId;

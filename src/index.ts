@@ -36,6 +36,7 @@ import {
   generateTitle,
   getWorkdir,
   getDataDir,
+  getProviderTimeoutMs,
   getSandbox,
 } from "./shared.js";
 
@@ -111,6 +112,7 @@ class LRUMap<K, V> {
 
 const sessionIdByChat = new LRUMap<string, string>(MAX_CHAT_SESSIONS);
 const sessionGenerationByChat = new Map<string, number>();
+const stoppedByChat = new Map<string, boolean>(); // 记录被手动停止的会话
 
 // --- Core logic ---
 
@@ -120,6 +122,7 @@ function getSessionGeneration(chatId: string): number {
 
 function resetChatSession(chatId: string, source?: string): void {
   sessionIdByChat.delete(chatId);
+  stoppedByChat.delete(chatId);
   sessionGenerationByChat.set(chatId, getSessionGeneration(chatId) + 1);
   if (source) {
     db.detachChatId(source, chatId);
@@ -166,11 +169,15 @@ function getOrCreateChannelSession(
   return session;
 }
 
+// 图片扩展名集合
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
+
 async function generateReply(
   chatId: string,
   userText: string,
   imagePaths: string[] = [],
   source: string = "unknown",
+  callbacks?: ChannelCallbacks,
 ): Promise<string> {
   try {
     const dbSession = getOrCreateChannelSession(source, chatId);
@@ -182,12 +189,11 @@ async function generateReply(
     }
 
     const sessionId = sessionIdByChat.get(chatId);
+    const currentSessionId = sessionId; // 重命名，确保局部作用域清晰
     const sessionGeneration = getSessionGeneration(chatId);
-    const prompt = sessionId
+    const prompt = currentSessionId
       ? buildResumePrompt(userText, source)
       : buildFirstTurnPrompt(userText, source);
-
-    db.addMessage(dbSession.id, "user", userText);
 
     // 统一图片存储逻辑：将所有图片备份到持久化目录
     const persistentImagePaths: string[] = [];
@@ -214,6 +220,11 @@ async function generateReply(
       }
     }
 
+    // 关键修正：搬家后再存数据库，并带上户口（metadata）
+    const attachments = persistentImagePaths.map(p => ({ name: path.basename(p), path: p }));
+    const metadata = attachments.length > 0 ? JSON.stringify({ attachments }) : null;
+    db.addMessage(dbSession.id, "user", userText, metadata);
+
     if (dbSession.messages.length <= 1) {
       dbSession.title = generateTitle(userText);
     }
@@ -222,8 +233,8 @@ async function generateReply(
       chatId,
       source,
       provider: getProvider().type,
-      mode: sessionId ? "resume" : "new",
-      sessionId: sessionId || null,
+      mode: currentSessionId ? "resume" : "new",
+      sessionId: currentSessionId || null,
       dbSessionId: dbSession.id,
       userTextChars: userText.length,
       promptChars: prompt.length,
@@ -231,23 +242,36 @@ async function generateReply(
       ...(shouldLogPrompt ? { prompt: rawLogString(prompt) } : {}),
     });
 
+    const hardTimeoutWarningTimer = setTimeout(async () => {
+      logger.info("reply.hard_timeout_warning_triggered", { chatId });
+      const warningMsg = `老山爹，大仙已经面壁苦思超过 ${Math.floor(getProviderTimeoutMs() / 60000)} 分钟了！这道题可能真的太难了。富贵我还在替您盯着，您要是心疼服务器，可以回复 /stop 让我把它给毙了。`;
+      if (callbacks?.sendProgress) {
+        await callbacks.sendProgress(chatId, warningMsg);
+      }
+    }, getProviderTimeoutMs());
+
     let result = await getProvider().run({
       workdir: getWorkdir(),
       sandbox: getSandbox(),
       model: getCurrentModel(),
       prompt,
+      chatId,
       imagePaths: persistentImagePaths,
-      sessionId: sessionId || undefined,
+      sessionId: currentSessionId || undefined,
     }).catch(async (error) => {
-      // 核心重试逻辑：如果 Session 找不到了，尝试通过数据库重构上下文
-      if (error instanceof ProviderSessionNotFoundError) {
-        logger.warn("reply.session_not_found_retry", { chatId, oldSessionId: sessionId });
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const isSessionNotFound = errorMsg.includes("Session not found") || (error as any).name === "ProviderSessionNotFoundError";
+
+      // 核心重试逻辑：只要报错信息包含 Session not found，即刻触发重构
+      if (isSessionNotFound) {
+        logger.warn("reply.session_not_found_retry_triggered", { chatId, oldSessionId: currentSessionId, errorMsg });
         
         // 从数据库获取历史消息（排除最后一条刚存入的用户消息）
         const historyMessages = dbSession.messages.slice(0, -1);
         
-        // 如果历史太长（超过 100 轮），这里未来可以扩展自动压缩逻辑
-        // 目前先取全量或最近的大量记录
+        // 关键：在日志中记录提取到的历史记录数量
+        logger.info("retry.history_extracted", { count: historyMessages.length });
+        
         const historyText = historyMessages.map(m => 
           `${m.role === "user" ? "用户" : "Gemini"}: ${m.content}`
         ).join("\n");
@@ -260,17 +284,25 @@ ${historyText}
 CURRENT_QUESTION:
 ${userText}`;
 
+        // 关键：在日志中记录重构后的完整 Prompt (如果 LOG_INCLUDE_PROMPT 为 true)
+        if (includePromptInLogs()) {
+          logger.info("retry.reconstructed_prompt", { prompt: rawLogString(reconstructedPrompt) });
+        }
+
         // 发起第二次尝试，这次不带 sessionId
         return await getProvider().run({
           workdir: getWorkdir(),
           sandbox: getSandbox(),
           model: getCurrentModel(),
           prompt: reconstructedPrompt,
+          chatId,
           imagePaths: persistentImagePaths,
           sessionId: undefined,
         });
       }
       throw error; // 其他错误照常抛出
+    }).finally(() => {
+      clearTimeout(hardTimeoutWarningTimer);
     });
 
     if (result.sessionId && sessionGeneration === getSessionGeneration(chatId)) {
@@ -297,6 +329,10 @@ ${userText}`;
 
     return result.text;
   } catch (error) {
+    if (stoppedByChat.get(chatId)) {
+      stoppedByChat.delete(chatId);
+      return "任务已按您的指令终止。";
+    }
     logger.error("reply.generate.failed", { chatId, source, error });
     return formatProviderError(error);
   }
@@ -347,8 +383,58 @@ function handleSwitchModel(modelId: string) {
 
 const channelCallbacks: ChannelCallbacks = {
   generateReply: (chatId, userText, imagePaths, source) =>
-    generateReply(chatId, userText, imagePaths, source),
+    generateReply(chatId, userText, imagePaths, source, channelCallbacks),
+  retryReply: async (chatId, source) => {
+    const dbSession = getOrCreateChannelSession(source || "unknown", chatId);
+    const lastUserMsg = [...dbSession.messages].reverse().find(m => m.role === "user");
+    if (!lastUserMsg) {
+      throw new Error("找不到可重试的历史消息");
+    }
+    
+    // 解析附件信息
+    let imagePaths: string[] = [];
+    if (lastUserMsg.metadata) {
+      try {
+        const meta = JSON.parse(lastUserMsg.metadata);
+        if (meta.attachments) {
+          imagePaths = meta.attachments
+            .filter((a: any) => IMAGE_EXTS.has(path.extname(a.name).toLowerCase()))
+            .map((a: any) => a.path);
+        }
+      } catch (e) {
+        logger.warn("retry.metadata_parse_failed", { chatId, error: e });
+      }
+    }
+
+    return await generateReply(chatId, lastUserMsg.content, imagePaths, source, channelCallbacks);
+  },
+  sendProgress: async (chatId, message) => {
+    // 基础实现，后续具体的频道（如 feishu.ts）会通过注册机制覆盖或包装它
+  },
   resetSession: resetChatSession,
+  stopSession: async (chatId) => {
+    const provider = getProvider();
+    if (provider.stop) {
+      stoppedByChat.set(chatId, true);
+      await provider.stop(chatId);
+    }
+  },
+  listUserSessions: async (chatId, source) => {
+    return db.listUserSessions(source);
+  },
+  getSessionMessages: async (dbSessionId) => {
+    const session = db.getSession(dbSessionId);
+    return session ? session.messages : [];
+  },
+  resumeSession: async (chatId, source, dbSessionId) => {
+    // 1. 先把当前 chatId 身上绑着的旧关系给断了
+    db.detachChatId(source, chatId);
+    // 2. 把目标旧房间重新贴上这个 chatId 的名号
+    db.attachChatId(chatId, dbSessionId);
+    // 3. 清理内存缓存，让它下次聊天时强制去数据库里翻这个新房间的底
+    sessionIdByChat.delete(chatId);
+    logger.info("reply.session_resumed_manual", { chatId, dbSessionId });
+  },
   listProviders,
   switchProvider: handleSwitchProvider,
   listModels,

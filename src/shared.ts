@@ -70,6 +70,10 @@ export function getDataDir(): string {
   return anybotDataDir;
 }
 
+export function getProviderTimeoutMs(): number {
+  return parseInt(process.env.PROVIDER_TIMEOUT_MS || "600000", 10);
+}
+
 export function getSandbox(): SandboxMode {
   return sandbox;
 }

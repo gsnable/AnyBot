@@ -17,6 +17,7 @@ import { logger } from "../logger.js";
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.PROVIDER_TIMEOUT_MS || "600000", 10);
 
 interface GeminiJsonOutput {
+  session_id?: string;
   response?: string;
   stats?: unknown;
   error?: {
@@ -44,10 +45,25 @@ export class GeminiCliProvider implements IProvider {
 
   private readonly bin: string;
   private readonly approvalMode: string;
+  private activeProcesses = new Map<string, number>();
 
   constructor(opts?: { bin?: string; approvalMode?: string }) {
     this.bin = opts?.bin ?? "gemini";
     this.approvalMode = opts?.approvalMode ?? "yolo";
+  }
+
+  async stop(chatId: string): Promise<void> {
+    const pgid = this.activeProcesses.get(chatId);
+    if (pgid) {
+      try {
+        process.kill(-pgid, "SIGKILL");
+        logger.info("provider.exec.stopped", { provider: this.type, chatId, pgid });
+      } catch (e) {
+        logger.warn("provider.exec.stop_failed", { provider: this.type, chatId, pgid, error: e });
+      } finally {
+        this.activeProcesses.delete(chatId);
+      }
+    }
   }
 
   listModels(): ProviderModel[] {
@@ -65,6 +81,7 @@ export class GeminiCliProvider implements IProvider {
       prompt,
       model,
       sessionId,
+      chatId,
       imagePaths = [],
       timeoutMs = DEFAULT_TIMEOUT_MS,
     } = opts;
@@ -109,25 +126,12 @@ export class GeminiCliProvider implements IProvider {
         detached: true,
       });
 
+      if (child.pid && chatId) {
+        this.activeProcesses.set(chatId, child.pid);
+      }
+
       let stdout = "";
       let stderr = "";
-      let killed = false;
-
-      const killProcessGroup = (signal: NodeJS.Signals) => {
-        try {
-          if (child.pid) process.kill(-child.pid, signal);
-        } catch {
-          child.kill(signal);
-        }
-      };
-
-      const timer = setTimeout(() => {
-        killed = true;
-        killProcessGroup("SIGTERM");
-        setTimeout(() => {
-          if (!child.killed) killProcessGroup("SIGKILL");
-        }, 3000);
-      }, timeoutMs);
 
       child.stdout.on("data", (chunk: Buffer) => {
         stdout += chunk.toString("utf8");
@@ -140,7 +144,7 @@ export class GeminiCliProvider implements IProvider {
       child.stdin.end();
 
       child.on("error", (error) => {
-        clearTimeout(timer);
+        if (chatId) this.activeProcesses.delete(chatId);
         logger.error("provider.exec.spawn_error", {
           provider: this.type,
           workdir,
@@ -151,17 +155,21 @@ export class GeminiCliProvider implements IProvider {
       });
 
       child.on("close", (code) => {
-        clearTimeout(timer);
+        if (chatId) this.activeProcesses.delete(chatId);
 
-        if (killed) {
-          logger.warn("provider.exec.timeout", {
+        // 判定 Session 是否丢失：1. 退出码为 42；2. 或者虽然退出码正常但 stderr 明确报了恢复失败
+        const isSessionLost = (code === 42 || code === 0) && 
+                             sessionId && 
+                             stderr.includes("Error resuming session");
+
+        if (isSessionLost) {
+          logger.warn("provider.exec.session_not_found_detected", {
             provider: this.type,
-            workdir,
-            durationMs: Date.now() - startedAt,
-            stdoutChars: stdout.length,
-            stderrChars: stderr.length,
+            code,
+            sessionId,
+            stderrPreview: stderr.slice(0, 200)
           });
-          reject(new ProviderTimeoutError(timeoutMs));
+          reject(new ProviderSessionNotFoundError(sessionId));
           return;
         }
 
@@ -176,13 +184,6 @@ export class GeminiCliProvider implements IProvider {
             stderrPreview: stderr.slice(0, 400),
             stdoutPreview: stdout.slice(0, 400),
           });
-          
-          // 如果是 ID 不存在导致的退出，抛出特定异常以触发重试逻辑
-          if (code === 42 && sessionId && stderr.includes("Invalid session identifier")) {
-            reject(new ProviderSessionNotFoundError(sessionId));
-            return;
-          }
-
           reject(new ProviderProcessError(code, stderr || stdout));
           return;
         }
@@ -232,7 +233,8 @@ export class GeminiCliProvider implements IProvider {
           return;
         }
 
-        const newSessionId = sessionId ?? this.resolveLatestSessionId(workdir);
+        // 优先从大仙返回的 JSON 中提取会话 ID，大仙给的才是最准的！
+        const newSessionId = parsed.session_id || sessionId || this.resolveLatestSessionId(workdir);
 
         logger.info("provider.exec.success", {
           provider: this.type,

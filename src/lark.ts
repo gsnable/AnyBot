@@ -80,13 +80,13 @@ function splitMarkdownBlocks(text: string): string[] {
   return blocks;
 }
 
-function buildCardElements(text: string): LarkCardElement[] {
+function buildCardElements(text: string, isLarge?: boolean): LarkCardElement[] {
   const blocks = splitMarkdownBlocks(text);
   if (blocks.length === 0) {
     return [
       {
         tag: "markdown",
-        content: text,
+        content: isLarge ? `**${text}**` : text,
       },
     ];
   }
@@ -95,7 +95,7 @@ function buildCardElements(text: string): LarkCardElement[] {
     const elements: LarkCardElement[] = [
       {
         tag: "markdown",
-        content: block,
+        content: isLarge ? `**${block}**` : block,
       },
     ];
 
@@ -107,21 +107,26 @@ function buildCardElements(text: string): LarkCardElement[] {
   });
 }
 
-function toInteractiveCardContent(text: string): string {
-  return JSON.stringify({
+function toInteractiveCardContent(text: string, title?: string): string {
+  const card: any = {
     config: {
       wide_screen_mode: true,
       enable_forward: true,
     },
-    header: {
+    elements: buildCardElements(text, !title), // 没标题时开启放大模式
+  };
+
+  if (title) {
+    card.header = {
       title: {
         tag: "plain_text",
-        content: "AnyBot 回复",
+        content: title,
       },
       template: "blue",
-    },
-    elements: buildCardElements(text),
-  });
+    };
+  }
+
+  return JSON.stringify(card);
 }
 
 async function sendPlainText(
@@ -196,6 +201,7 @@ export async function sendText(
   client: Lark.Client,
   chatId: string,
   text: string,
+  title?: string,
 ): Promise<void> {
   logger.debug("lark.send_text", {
     chatId,
@@ -211,7 +217,7 @@ export async function sendText(
     data: {
       receive_id: chatId,
       msg_type: "interactive",
-      content: toInteractiveCardContent(text),
+      content: toInteractiveCardContent(text, title),
     },
   }).catch(async (error: unknown) => {
     if (!isCardContentError(error)) {

@@ -68,6 +68,15 @@ export class FeishuChannel implements IChannel {
     this.callbacks = callbacks;
     this.startedAtMs = Date.now();
 
+    // 重新包装回调：注入飞书特有的进度发送逻辑
+    const originalSendProgress = callbacks.sendProgress;
+    callbacks.sendProgress = async (chatId, text) => {
+      if (this.larkClient) {
+        await sendText(this.larkClient, chatId, text, "系统提示");
+      }
+      if (originalSendProgress) await originalSendProgress(chatId, text);
+    };
+
     const { client, wsClient, EventDispatcher } = createLarkClients(
       config.appId,
       config.appSecret,
@@ -216,9 +225,9 @@ export class FeishuChannel implements IChannel {
       return;
     }
 
-    const cmd = handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
+    const cmd = await handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
     if (cmd.handled) {
-      if (cmd.reply) await sendText(client, message.chat_id, cmd.reply);
+      if (cmd.reply) await sendText(client, message.chat_id, cmd.reply, "系统提示");
       return;
     }
 
@@ -247,7 +256,7 @@ export class FeishuChannel implements IChannel {
           error,
         });
         const { formatProviderError } = await import("../index.js");
-        await sendText(client, message.chat_id, formatProviderError(error));
+        await sendText(client, message.chat_id, formatProviderError(error), "系统提示");
       }
     });
   }
@@ -293,7 +302,7 @@ export class FeishuChannel implements IChannel {
           error,
         });
         const { formatProviderError } = await import("../index.js");
-        await sendText(client, message.chat_id, formatProviderError(error));
+        await sendText(client, message.chat_id, formatProviderError(error), "系统提示");
       }
     });
   }
@@ -341,7 +350,7 @@ export class FeishuChannel implements IChannel {
           error,
         });
         const { formatProviderError } = await import("../index.js");
-        await sendText(client, message.chat_id, formatProviderError(error));
+        await sendText(client, message.chat_id, formatProviderError(error), "系统提示");
       }
     });
   }

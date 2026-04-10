@@ -113,6 +113,16 @@ const stmts = {
     UPDATE sessions SET chat_id = NULL WHERE source = ? AND chat_id = ?
   `),
 
+  attachChatId: db.prepare(`
+    UPDATE sessions SET chat_id = ? WHERE id = ?
+  `),
+
+  listUserSessions: db.prepare(`
+    SELECT id, title, updated_at AS updatedAt FROM sessions 
+    WHERE source = ? 
+    ORDER BY updated_at DESC LIMIT 10
+  `),
+
   detachAllChannelSessions: db.prepare(`
     UPDATE sessions SET chat_id = NULL WHERE source != 'web' AND chat_id IS NOT NULL
   `),
@@ -205,6 +215,14 @@ export function addMessage(sessionId: string, role: "user" | "assistant", conten
 
 export function detachChatId(source: string, chatId: string): void {
   stmts.detachChatId.run(source, chatId);
+}
+
+export function attachChatId(chatId: string, sessionId: string): void {
+  stmts.attachChatId.run(chatId, sessionId);
+}
+
+export function listUserSessions(source: string): any[] {
+  return stmts.listUserSessions.all(source);
 }
 
 export function detachAllChannelSessions(): void {

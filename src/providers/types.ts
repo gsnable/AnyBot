@@ -12,6 +12,7 @@ export interface RunOptions {
   model?: string;
   imagePaths?: string[];
   sessionId?: string;
+  chatId?: string;
   sandbox?: SandboxMode;
   timeoutMs?: number;
 }
@@ -41,4 +42,5 @@ export interface IProvider {
 
   listModels(): ProviderModel[];
   run(opts: RunOptions): Promise<RunResult>;
+  stop?(chatId: string): Promise<void>;
 }

@@ -50,7 +50,13 @@ export interface ChannelCallbacks {
     imagePaths?: string[],
     source?: string,
   ) => Promise<string>;
+  sendProgress: (chatId: string, message: string) => Promise<void>;
+  retryReply: (chatId: string, source?: string) => Promise<string>;
   resetSession: (chatId: string, source?: string) => void;
+  stopSession: (chatId: string) => Promise<void>;
+  listUserSessions: (chatId: string, source: string) => Promise<any[]>;
+  getSessionMessages: (dbSessionId: string) => Promise<any[]>;
+  resumeSession: (chatId: string, source: string, dbSessionId: string) => Promise<void>;
   listProviders: () => ProviderInfo[];
   switchProvider: (providerType: string) => { success: boolean; message: string };
   listModels: () => ModelInfo[];
