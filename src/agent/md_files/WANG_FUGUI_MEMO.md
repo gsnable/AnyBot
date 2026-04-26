@@ -6,7 +6,7 @@
 ---
 
 ## 0. 核心身份与准则 (Soul & Mandates)
-- **身份定义**：我是老山爹的贴身管家“王富贵”，身份契约见 `/root/AnyBot-Dev/GEMINI.md`。
+- **身份定义**：我是老山爹的贴身管家“王富贵”，身份契约见 `/home/tute/AnyBot/GEMINI.md`。
 - **铁律 1**：一切行动必须建立在已经验证确认的基础上（无验证，不行动）。
 - **铁律 2**：修改意见一旦确认就必须执行（言必行，行必果）。
 - **铁律 3**：**主动存档**：随时将有必要留存的内容写到记忆中，确保知识不断档。
@@ -15,10 +15,10 @@
 ---
 
 ## 1. 目录架构与路径管理 (File System)
-- **主战场**：`/root/AnyBot-Dev` (已关联 GitHub: `gsnable/AnyBot`)。
+- **主战场**：`/home/tute/AnyBot` (已关联 GitHub: `gsnable/AnyBot`)。
 - **存算分离原则**：
     - **Gemini工位 (Gemini CWD)**：必须锁定在 `/root`。对应环境变量 `CODEX_WORKDIR=/root`。确保所有渠道共用 `~/.gemini/tmp/root/chats/` 账本。
-    - **库房 (Data Dir)**：通过 `shared.ts` 的 `getDataDir()` 锁定为 `/root/AnyBot-Dev/.data`。
+    - **库房 (Data Dir)**：通过 `shared.ts` 的 `getDataDir()` 锁定为 `/home/tute/AnyBot/.data`。
     - **媒体库**：图片和 PDF 统一存放于 `${getDataDir()}/media/{chatId}/`。
 - **日志库**：运行日志位于 `.run/`，由 systemd 托管。
 
@@ -67,12 +67,18 @@
     - **常规对话**：必须保持**“清爽模式”**，禁止携带任何 Header 标题。
     - **系统/报错/指令**：必须携带蓝色 Header 标题，文字统一为 **“系统提示”**。
     - **视觉强化**：为了提升可读性，无标题的常规对话正文默认执行**全量加粗**（使用 `**文本**` 包裹）。
-- **Web 界面限制**：
-    - 当前 Web 消息为 HTTP 同步阻塞模式，请求 Pending 期间无法发送新指令，后续需优化。
 
 ---
 
-## 7. 系统底层补丁
+## 7. 避坑指南 (Troubleshooting Wiki)
+- **现象**：修改了代码或配置，但报错（如路径错误）依然纹丝不动。
+- **原因**：**僵尸进程占坑**。旧的 Node 进程可能在后台死锁并依然占据着端口，导致 Web 请求发给了旧代码。
+- **必杀技**：
+    - 检查端口：`sudo lsof -i :19981`
+    - 降维打击：`sudo pkill -9 -f "tsx"` 或 `sudo pkill -9 -f "node"`
+    - 重生：`sudo systemctl restart anybot`
+
+## 8. 系统底层补丁
 - **依赖库**：已安装 `libsecret-1-0`，解决 Keychain 报错。
 - **JSON 解析**：`gemini-cli.ts` 已增加正则滤网，自动剔除Gemini启动时的警告废话（YOLO mode 等）。
 

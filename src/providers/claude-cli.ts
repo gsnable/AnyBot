@@ -76,7 +76,7 @@ export class ClaudeCliProvider implements IProvider {
     const effectiveSessionId = sessionId || uuidv4();
 
     // 强制锁定工作目录
-    const projectRoot = "/root/AnyBot-Dev";
+    const projectRoot = process.cwd();
     const effectiveWorkdir = projectRoot;
 
     // 终极提示词优化：最朴素的中文指令对当前环境最有效

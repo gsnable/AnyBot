@@ -4,26 +4,29 @@ import type { SandboxMode } from "./types.js";
 import { sandboxModes } from "./types.js";
 import { buildSystemPrompt } from "./prompt.js";
 
-const sandboxRaw = process.env.CODEX_SANDBOX || "read-only";
-const workdir = process.env.CODEX_WORKDIR || process.cwd();
-const extraSystemPrompt = process.env.CODEX_SYSTEM_PROMPT;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-if (!sandboxModes.includes(sandboxRaw as SandboxMode)) {
-  throw new Error(
-    `CODEX_SANDBOX 配置无效：${sandboxRaw}。可选值只有：${sandboxModes.join("、")}`,
-  );
+export function getWorkdir(): string {
+  return process.env.CODEX_WORKDIR || process.cwd();
 }
 
-const sandbox = sandboxRaw as SandboxMode;
+export function getDataDir(): string {
+  return process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.resolve(__dirname, "../.data");
+}
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const anybotDataDir = path.resolve(__dirname, "../.data");
+export function getSandbox(): SandboxMode {
+  const sandboxRaw = process.env.CODEX_SANDBOX || "read-only";
+  if (!sandboxModes.includes(sandboxRaw as SandboxMode)) {
+    return "read-only";
+  }
+  return sandboxRaw as SandboxMode;
+}
 
 function getSystemPrompt(): string {
   return buildSystemPrompt({
-    workdir,
-    sandbox,
-    extraPrompt: extraSystemPrompt,
+    workdir: getWorkdir(),
+    sandbox: getSandbox(),
+    extraPrompt: process.env.CODEX_SYSTEM_PROMPT,
   });
 }
 
@@ -62,18 +65,6 @@ export function generateTitle(text: string): string {
   return clean.length > 20 ? clean.slice(0, 20) + "…" : clean;
 }
 
-export function getWorkdir(): string {
-  return workdir;
-}
-
-export function getDataDir(): string {
-  return anybotDataDir;
-}
-
 export function getProviderTimeoutMs(): number {
   return parseInt(process.env.PROVIDER_TIMEOUT_MS || "600000", 10);
-}
-
-export function getSandbox(): SandboxMode {
-  return sandbox;
 }

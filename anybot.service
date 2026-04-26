@@ -1,0 +1,22 @@
+[Unit]
+Description=AnyBot Service - AI Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=tute
+Group=tute
+WorkingDirectory=/home/tute/AnyBot
+# 使用全路径 node 和 tsx 确保稳定性
+ExecStart=/home/tute/.nvm/versions/node/v24.15.0/bin/node /home/tute/AnyBot/node_modules/.bin/tsx src/index.ts
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=CODEX_WORKDIR=/home/tute/AnyBot
+# 继承 NVM 路径
+Environment=PATH=/home/tute/.nvm/versions/node/v24.15.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# 指定数据存储目录（如果需要覆盖环境变量）
+# Environment=DATA_DIR=/home/tute/AnyBot/.data
+
+[Install]
+WantedBy=multi-user.target
