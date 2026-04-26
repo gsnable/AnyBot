@@ -207,7 +207,7 @@ export class TelegramChannel implements IChannel {
     this.queueByChat.set(chatId, next);
   }
 
-  private handleMessage(message: TelegramMessage): void {
+  private async handleMessage(message: TelegramMessage): Promise<void> {
     if (message.from?.is_bot) return;
     if (message.new_chat_members || message.left_chat_member) return;
 
@@ -243,7 +243,7 @@ export class TelegramChannel implements IChannel {
 
     if (!userText) return;
 
-    const cmd = handleCommand(userText, chatId, "telegram", this.callbacks!);
+    const cmd = await handleCommand(userText, chatId, "telegram", this.callbacks!);
     if (cmd.handled) {
       this.enqueueChatTask(chatId, async () => {
         if (cmd.reply) await this.sendReply(chatId, cmd.reply);

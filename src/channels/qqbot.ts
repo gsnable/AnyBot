@@ -240,7 +240,7 @@ export class QQBotChannel implements IChannel {
       return;
     }
 
-    const cmd = handleCommand(userText, chatId, "qqbot", this.callbacks!);
+    const cmd = await handleCommand(userText, chatId, "qqbot", this.callbacks!);
     if (cmd.handled) {
       if (cmd.reply) await this.sendText(chatId, message.id, cmd.reply, eventType);
       return;

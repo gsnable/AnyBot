@@ -108,7 +108,6 @@ export class FeishuChannel implements IChannel {
 
   async stop(): Promise<void> {
     if (this.wsClient) {
-      await this.wsClient.stop();
       this.wsClient = null;
     }
     this.larkClient = null;
@@ -356,8 +355,7 @@ export class FeishuChannel implements IChannel {
   }
 
   private shouldReplyInGroup(mentions?: Array<{ id?: { open_id?: string } }>): boolean {
-    if (this.config?.groupChatMode === "always") return true;
-    if (this.config?.groupChatMode === "never") return false;
+    if (this.config?.groupChatMode === "all") return true;
     // mention 模式
     return !!mentions?.some((m) => m.id?.open_id === this.config?.botOpenId);
   }
