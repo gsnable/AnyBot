@@ -4,9 +4,12 @@
 
 把 AI CLI 工具变成可远程使用的 AI 助手——通过内置 **Web UI** 在浏览器里对话，或通过 **飞书机器人** / **QQ 机器人** / **Telegram 机器人** 在手机 / 桌面端随时向你这台机器上的 AI 发消息。
 
-目前支持 [OpenAI Codex CLI](https://github.com/openai/codex)、[Google Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Cursor CLI](https://docs.cursor.com/cli) 和 [Qoder CLI](https://docs.qoder.com) 作为 Provider，架构已为接入更多 CLI 工具（Claude Code 等）做好准备。
+---
 
-支持 **macOS** 和 **Linux**。
+## 近期更新 (2026-04-26)
+
+- **Docker 环境优化** — 自动清理了系统中 Repository 为 `<none>` 的 dangling 镜像，释放存储空间。
+- **服务稳定性增强** — 修复了 `scripts/` 下控制脚本的执行权限，并优化了机器人重启时的 PID 清理逻辑。
 
 ---
 
