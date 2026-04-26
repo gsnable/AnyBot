@@ -1,5 +1,6 @@
 import "dotenv/config";
 import * as fsPromises from "node:fs/promises";
+import * as fs from "node:fs";
 import path from "node:path";
 
 import { applyProxy } from "./proxy.js";
@@ -40,8 +41,6 @@ import {
   getSandbox,
 } from "./shared.js";
 
-const providerType = process.env.PROVIDER || "codex";
-
 function getProviderConfig(type: string): Record<string, unknown> {
   switch (type) {
     case "codex":
@@ -50,6 +49,11 @@ function getProviderConfig(type: string): Record<string, unknown> {
       return {
         bin: process.env.GEMINI_CLI_BIN,
         approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || "yolo",
+      };
+    case "claude-code":
+      return {
+        bin: process.env.CLAUDE_CLI_BIN,
+        approvalMode: process.env.CLAUDE_CLI_APPROVAL_MODE || "yolo",
       };
     case "cursor-cli":
       return {
@@ -68,8 +72,6 @@ function getProviderConfig(type: string): Record<string, unknown> {
       return {};
   }
 }
-
-const provider = initProvider(providerType, getProviderConfig(providerType));
 
 const shouldLogContent = includeContentInLogs();
 const shouldLogPrompt = includePromptInLogs();
@@ -139,19 +141,13 @@ export function formatProviderError(error: unknown): string {
   if (error instanceof ProviderEmptyOutputError) {
     return "没有生成有效回复，请换个方式描述试试。";
   }
-  
-  // 增加对通用错误的详细说明，方便调试
   if (error instanceof Error) {
     return `处理消息时出错了: ${error.message}`;
   }
-  
   return "处理消息时出错了，原因未知。";
 }
 
-function getOrCreateChannelSession(
-  source: string,
-  chatId: string,
-): db.ChatSession {
+function getOrCreateChannelSession(source: string, chatId: string): db.ChatSession {
   const existing = db.findSessionBySourceChat(source, chatId);
   if (existing) return existing;
 
@@ -169,7 +165,6 @@ function getOrCreateChannelSession(
   return session;
 }
 
-// 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
 
 async function generateReply(
@@ -181,21 +176,18 @@ async function generateReply(
 ): Promise<string> {
   try {
     const dbSession = getOrCreateChannelSession(source, chatId);
-    
-    // 如果内存中没有 sessionId，但数据库中有，则尝试恢复它（实现重启后的记忆接续）
     if (!sessionIdByChat.has(chatId) && dbSession.sessionId) {
       sessionIdByChat.set(chatId, dbSession.sessionId);
       logger.info("reply.session_recovered", { chatId, sessionId: dbSession.sessionId });
     }
 
     const sessionId = sessionIdByChat.get(chatId);
-    const currentSessionId = sessionId; // 重命名，确保局部作用域清晰
+    const currentSessionId = sessionId;
     const sessionGeneration = getSessionGeneration(chatId);
     const prompt = currentSessionId
       ? buildResumePrompt(userText, source)
       : buildFirstTurnPrompt(userText, source);
 
-    // 统一图片存储逻辑：将所有图片备份到持久化目录
     const persistentImagePaths: string[] = [];
     const mediaDir = path.join(getDataDir(), "media", chatId);
     await fsPromises.mkdir(mediaDir, { recursive: true }).catch(() => {});
@@ -210,7 +202,6 @@ async function generateReply(
       try {
         await fsPromises.copyFile(imgPath, newPath);
         persistentImagePaths.push(newPath);
-        // 备份成功后，删除原始临时文件以节省空间
         if (imgPath.includes("/tmp/")) {
           await fsPromises.unlink(imgPath).catch(() => {});
         }
@@ -220,7 +211,6 @@ async function generateReply(
       }
     }
 
-    // 关键修正：搬家后再存数据库，并带上户口（metadata）
     const attachments = persistentImagePaths.map(p => ({ name: path.basename(p), path: p }));
     const metadata = attachments.length > 0 ? JSON.stringify({ attachments }) : null;
     db.addMessage(dbSession.id, "user", userText, metadata);
@@ -262,16 +252,10 @@ async function generateReply(
       const errorMsg = error instanceof Error ? error.message : String(error);
       const isSessionNotFound = errorMsg.includes("Session not found") || (error as any).name === "ProviderSessionNotFoundError";
 
-      // 核心重试逻辑：只要报错信息包含 Session not found，即刻触发重构
       if (isSessionNotFound) {
         logger.warn("reply.session_not_found_retry_triggered", { chatId, oldSessionId: currentSessionId, errorMsg });
-        
-        // 从数据库获取历史消息（排除最后一条刚存入的用户消息）
         const historyMessages = dbSession.messages.slice(0, -1);
-        
-        // 关键：在日志中记录提取到的历史记录数量
         logger.info("retry.history_extracted", { count: historyMessages.length });
-        
         const historyText = historyMessages.map(m => 
           `${m.role === "user" ? "用户" : "Gemini"}: ${m.content}`
         ).join("\n");
@@ -284,12 +268,10 @@ ${historyText}
 CURRENT_QUESTION:
 ${userText}`;
 
-        // 关键：在日志中记录重构后的完整 Prompt (如果 LOG_INCLUDE_PROMPT 为 true)
         if (includePromptInLogs()) {
           logger.info("retry.reconstructed_prompt", { prompt: rawLogString(reconstructedPrompt) });
         }
 
-        // 发起第二次尝试，这次不带 sessionId
         return await getProvider().run({
           workdir: getWorkdir(),
           sandbox: getSandbox(),
@@ -300,7 +282,7 @@ ${userText}`;
           sessionId: undefined,
         });
       }
-      throw error; // 其他错误照常抛出
+      throw error;
     }).finally(() => {
       clearTimeout(hardTimeoutWarningTimer);
     });
@@ -390,8 +372,6 @@ const channelCallbacks: ChannelCallbacks = {
     if (!lastUserMsg) {
       throw new Error("找不到可重试的历史消息");
     }
-    
-    // 解析附件信息
     let imagePaths: string[] = [];
     if (lastUserMsg.metadata) {
       try {
@@ -405,33 +385,25 @@ const channelCallbacks: ChannelCallbacks = {
         logger.warn("retry.metadata_parse_failed", { chatId, error: e });
       }
     }
-
     return await generateReply(chatId, lastUserMsg.content, imagePaths, source, channelCallbacks);
   },
-  sendProgress: async (chatId, message) => {
-    // 基础实现，后续具体的频道（如 feishu.ts）会通过注册机制覆盖或包装它
-  },
+  sendProgress: async (chatId, message) => {},
   resetSession: resetChatSession,
   stopSession: async (chatId) => {
-    const provider = getProvider();
-    if (provider.stop) {
+    const p = getProvider();
+    if (p.stop) {
       stoppedByChat.set(chatId, true);
-      await provider.stop(chatId);
+      await p.stop(chatId);
     }
   },
-  listUserSessions: async (chatId, source) => {
-    return db.listUserSessions(source);
-  },
+  listUserSessions: async (chatId, source) => db.listUserSessions(source),
   getSessionMessages: async (dbSessionId) => {
     const session = db.getSession(dbSessionId);
     return session ? session.messages : [];
   },
   resumeSession: async (chatId, source, dbSessionId) => {
-    // 1. 先把当前 chatId 身上绑着的旧关系给断了
     db.detachChatId(source, chatId);
-    // 2. 把目标旧房间重新贴上这个 chatId 的名号
     db.attachChatId(chatId, dbSessionId);
-    // 3. 清理内存缓存，让它下次聊天时强制去数据库里翻这个新房间的底
     sessionIdByChat.delete(chatId);
     logger.info("reply.session_resumed_manual", { chatId, dbSessionId });
   },
@@ -452,6 +424,24 @@ async function main(): Promise<void> {
     logger.warn("proxy.init_failed", { error });
   }
 
+  // --- 核心修复：启动时精准读取持久化的 Provider 状态 ---
+  let finalProviderType = process.env.PROVIDER || "codex";
+  try {
+    const configPath = path.resolve(getDataDir(), "model-config.json");
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      if (config.provider) {
+        finalProviderType = config.provider;
+        logger.info("service.provider_recovered", { provider: finalProviderType });
+      }
+    }
+  } catch (e) {
+    // 忽略读取错误
+  }
+
+  // 初始化 Provider
+  const provider = initProvider(finalProviderType, getProviderConfig(finalProviderType));
+
   logger.info("service.starting", {
     provider: provider.type,
     providerDisplayName: provider.displayName,
@@ -462,9 +452,6 @@ async function main(): Promise<void> {
     logIncludePrompt: shouldLogPrompt,
     webPort: WEB_PORT,
   });
-
-  // db.detachAllChannelSessions();
-  // logger.info("service.channel_sessions_detached");
 
   const webApp = createApp();
   webApp.listen(WEB_PORT, () => {

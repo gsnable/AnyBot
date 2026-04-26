@@ -283,7 +283,7 @@ export class QoderCliProvider implements IProvider {
       "-q",
       "-p", opts.prompt,
       "-f", "json",
-      "--dangerously-skip-permissions",
+      "",
       "-w", opts.workdir,
     ];
 

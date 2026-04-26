@@ -170,17 +170,11 @@ function writeLogFile(line: string): void {
 }
 
 function buildLogFileName(date: Date): string {
-  const bucketDate = new Date(date.getTime());
-  bucketDate.setSeconds(0, 0);
-  bucketDate.setMinutes(Math.floor(bucketDate.getMinutes() / 10) * 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
 
-  const year = bucketDate.getFullYear();
-  const month = String(bucketDate.getMonth() + 1).padStart(2, "0");
-  const day = String(bucketDate.getDate()).padStart(2, "0");
-  const hour = String(bucketDate.getHours()).padStart(2, "0");
-  const minute = String(bucketDate.getMinutes()).padStart(2, "0");
-
-  return `${logBaseName}.${year}${month}${day}-${hour}${minute}`;
+  return `${logBaseName}.${year}${month}${day}`;
 }
 
 export const logger = {

@@ -3,6 +3,7 @@ import { CodexProvider } from "./codex.js";
 import { GeminiCliProvider } from "./gemini-cli.js";
 import { CursorCliProvider } from "./cursor-cli.js";
 import { QoderCliProvider } from "./qoder-cli.js";
+import { ClaudeCliProvider } from "./claude-cli.js";
 
 type ProviderFactory = (config?: Record<string, unknown>) => IProvider;
 
@@ -13,7 +14,12 @@ const providerFactories: Record<string, ProviderFactory> = {
       bin: config?.bin as string | undefined,
       approvalMode: config?.approvalMode as string | undefined,
     }),
+  "claude-code": (config) =>
+    new ClaudeCliProvider({
+      bin: config?.bin as string | undefined,
+    }),
   "cursor-cli": (config) =>
+
     new CursorCliProvider({
       bin: config?.bin as string | undefined,
       workspace: config?.workspace as string | undefined,
@@ -69,6 +75,7 @@ export type {
 } from "./types.js";
 export { CodexProvider } from "./codex.js";
 export { GeminiCliProvider, ProviderSessionNotFoundError } from "./gemini-cli.js";
+export { ClaudeCliProvider } from "./claude-cli.js";
 export { CursorCliProvider } from "./cursor-cli.js";
 export { QoderCliProvider } from "./qoder-cli.js";
 export {

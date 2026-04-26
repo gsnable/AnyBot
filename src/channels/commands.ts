@@ -13,23 +13,27 @@ export async function handleCommand(
 ): Promise<CommandResult> {
   const trimmed = userText.trim();
 
+  // 1. 重置会话
   if (trimmed === "/new" || trimmed === "/reset" || trimmed === "/start") {
     await callbacks.stopSession(chatId);
     callbacks.resetSession(chatId, source);
     return { handled: true, reply: "会话已重置，之前的进程已停止，我们可以开始新对话了。" };
   }
 
+  // 2. 停止任务
   if (trimmed === "/stop" || trimmed === "/kill") {
     await callbacks.stopSession(chatId);
     return { handled: true, reply: "已尝试停止当前正在运行的 AI 任务。" };
   }
 
+  // 3. 重试
   if (trimmed === "/retry") {
     await callbacks.stopSession(chatId);
     const reply = await callbacks.retryReply(chatId, source);
     return { handled: true, reply };
   }
 
+  // 4. 列出历史会话
   if (trimmed === "/chats") {
     const sessions = await callbacks.listUserSessions(chatId, source);
     if (sessions.length === 0) {
@@ -44,8 +48,13 @@ export async function handleCommand(
     return { handled: true, reply: lines.join("\n") };
   }
 
-  if (trimmed.startsWith("/resume ")) {
-    const index = parseInt(trimmed.slice("/resume ".length).trim(), 10) - 1;
+  // 5. 切换历史会话
+  if (trimmed.startsWith("/resume")) {
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) {
+      return { handled: true, reply: "请输入要切换的会话编号（例如：/resume 1）。您可以发送 /chats 查看最近的会话列表。" };
+    }
+    const index = parseInt(parts[1], 10) - 1;
     const sessions = await callbacks.listUserSessions(chatId, source);
     if (isNaN(index) || index < 0 || index >= sessions.length) {
       return { handled: true, reply: "编号无效，请从 /chats 列表中选择。" };
@@ -67,10 +76,12 @@ export async function handleCommand(
     return { handled: true, reply: `已成功切回到会话：【${targetSession.title}】。${historyText}\n\n您可以继续聊了。` };
   }
 
+  // 6. 帮助
   if (trimmed === "/help") {
     return { handled: true, reply: formatHelp() };
   }
 
+  // 7. 供应商切换
   if (trimmed === "/provider") {
     return { handled: true, reply: formatProviderList(callbacks) };
   }
@@ -84,6 +95,7 @@ export async function handleCommand(
     return { handled: true, reply: result.message };
   }
 
+  // 8. 模型切换
   if (trimmed === "/model") {
     return { handled: true, reply: formatModelList(callbacks) };
   }
