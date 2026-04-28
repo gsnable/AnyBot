@@ -83,19 +83,22 @@ function splitMarkdownBlocks(text: string): string[] {
 function buildCardElements(text: string, isLarge?: boolean): LarkCardElement[] {
   const blocks = splitMarkdownBlocks(text);
   if (blocks.length === 0) {
+    // 如果包含艾特标签，则不进行全量加粗，防止破坏标签结构
+    const shouldBold = isLarge && !text.includes("<at ");
     return [
       {
         tag: "markdown",
-        content: isLarge ? `**${text}**` : text,
+        content: shouldBold ? `**${text}**` : text,
       },
     ];
   }
 
   return blocks.flatMap((block, index) => {
+    const shouldBold = isLarge && !block.includes("<at ");
     const elements: LarkCardElement[] = [
       {
         tag: "markdown",
-        content: isLarge ? `**${block}**` : block,
+        content: shouldBold ? `**${block}**` : block,
       },
     ];
 
@@ -135,12 +138,14 @@ async function sendPlainText(
   text: string,
   replyToId?: string,
 ): Promise<void> {
+  const processedText = processMentions(text, "text");
+
   if (replyToId) {
     const res = await client.im.message.reply({
       path: { message_id: replyToId },
       data: {
         msg_type: "text",
-        content: JSON.stringify({ text }),
+        content: JSON.stringify({ text: processedText }),
       },
     });
     logger.info("lark.api.reply_result", { 
@@ -156,7 +161,7 @@ async function sendPlainText(
       data: {
         receive_id: receiveId,
         msg_type: "text",
-        content: JSON.stringify({ text }),
+        content: JSON.stringify({ text: processedText }),
       },
     });
   }
@@ -189,6 +194,21 @@ function detectLarkFileType(filePath: string): LarkFileType {
   }
 }
 
+function processMentions(text: string, mode: "text" | "card"): string {
+  return text.replace(/@\{([^|]+)\|([^}]+)\}/g, (_, name, id) => {
+    if (id === "all") {
+      return mode === "card" ? '<at id="all"></at>' : '<at all="">所有人</at>';
+    }
+    if (mode === "card") {
+      // 交互式卡片中的 markdown 标签使用 id
+      return `<at id="${id}"></at>`;
+    } else {
+      // 标准文本消息使用 user_id，必须包含用户名才能生效
+      return `<at user_id="${id}">${name}</at>`;
+    }
+  });
+}
+
 function formatCardFallbackText(text: string): string {
   return text.length > 300 ? `${text.slice(0, 300)}...` : text;
 }
@@ -202,7 +222,7 @@ function isCardContentError(error: unknown): boolean {
   };
   const code = maybeError.code ?? maybeError.response?.code;
   const message = maybeError.msg || maybeError.response?.msg || maybeError.message || "";
-  return code === 230028 || /interactive|card|content/i.test(message);
+  return code === 230028 || code === 230099 || /interactive|card|content|invalid user resource/i.test(message);
 }
 
 export function createLarkClients(appId: string, appSecret: string) {
@@ -233,7 +253,8 @@ export async function sendText(
       : {}),
   });
 
-  const content = toInteractiveCardContent(text, title);
+  const processedText = processMentions(text, "card");
+  const content = toInteractiveCardContent(processedText, title);
 
   try {
     if (replyToId) {

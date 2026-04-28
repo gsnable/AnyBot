@@ -86,7 +86,10 @@ export class FeishuChannel implements IChannel {
 
     const dispatcher = new EventDispatcher({}).register({
       "im.message.receive_v1": (event: {
-        sender: { sender_type: string };
+        sender: { 
+          sender_type: string;
+          sender_id?: { open_id?: string; user_id?: string };
+        };
         message: {
           message_id: string;
           create_time?: string;
@@ -138,7 +141,10 @@ export class FeishuChannel implements IChannel {
   }
 
   private async handleMessage(event: {
-    sender: { sender_type: string };
+    sender: { 
+      sender_type: string;
+      sender_id?: { open_id?: string; user_id?: string };
+    };
     message: {
       message_id: string;
       create_time?: string;
@@ -152,6 +158,7 @@ export class FeishuChannel implements IChannel {
     const { sender, message } = event;
     const client = this.larkClient!;
     const config = this.config!;
+    const senderOpenId = sender.sender_id?.open_id;
 
     // 【全量捕获】不加任何修饰，直接打印原始 JSON，看看 123456789 到底在哪
     logger.info("feishu.RAW_EVENT_FULL_DEBUG", { 
@@ -164,6 +171,7 @@ export class FeishuChannel implements IChannel {
       chatType: message.chat_type,
       messageType: message.message_type,
       senderType: sender.sender_type,
+      senderOpenId,
       mentionCount: message.mentions?.length || 0,
       ...(shouldLogContent
         ? { larkContent: rawLogString(message.content) }
@@ -257,7 +265,13 @@ export class FeishuChannel implements IChannel {
           "feishu",
           message.message_id,
         );
-        await sendReply(client, message.chat_id, reply, getWorkdir(), message.message_id);
+
+        let finalReply = reply;
+        if (message.chat_id.startsWith("oc_")) {
+          finalReply = `@{所有人|all}\n${reply}`;
+        }
+
+        await sendReply(client, message.chat_id, finalReply, getWorkdir(), message.message_id);
       } catch (error) {
         logger.error("feishu.text.failed", {
           messageId: message.message_id,
@@ -304,7 +318,11 @@ export class FeishuChannel implements IChannel {
           "feishu",
           message.message_id,
         );
-        await sendReply(client, message.chat_id, reply, getWorkdir(), message.message_id);
+        let finalReply = reply;
+        if (message.chat_id.startsWith("oc_")) {
+          finalReply = `@{所有人|all}\n${reply}`;
+        }
+        await sendReply(client, message.chat_id, finalReply, getWorkdir(), message.message_id);
       } catch (error) {
         logger.error("feishu.image.failed", {
           messageId: message.message_id,
@@ -353,7 +371,11 @@ export class FeishuChannel implements IChannel {
           "feishu",
           message.message_id,
         );
-        await sendReply(client, message.chat_id, reply, getWorkdir(), message.message_id);
+        let finalReply = reply;
+        if (message.chat_id.startsWith("oc_")) {
+          finalReply = `@{所有人|all}\n${reply}`;
+        }
+        await sendReply(client, message.chat_id, finalReply, getWorkdir(), message.message_id);
       } catch (error) {
         logger.error("feishu.file.failed", {
           messageId: message.message_id,
