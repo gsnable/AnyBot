@@ -28,7 +28,13 @@ export function parseIncomingText(content: string): string {
             const linkText = obj.text || "链接";
             texts.push(`${linkText}(${obj.href || ""})`);
           } else if (obj.tag === "at") {
-            texts.push(obj.user_name || "@某人");
+            const userId = obj.user_id || obj.open_id || "";
+            const userName = obj.user_name || "某人";
+            if (userId) {
+              texts.push(`@{${userName}|${userId}}`);
+            } else {
+              texts.push(`@${userName}`);
+            }
           } else if (obj.tag === "img") {
             texts.push("[图片]");
           } else {
