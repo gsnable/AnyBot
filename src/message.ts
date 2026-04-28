@@ -5,7 +5,42 @@ import type { ReplyPayload, TextMessageContent, ImageMessageContent, FileMessage
 
 export function parseIncomingText(content: string): string {
   try {
-    const parsed = JSON.parse(content) as TextMessageContent;
+    const parsed = JSON.parse(content);
+    
+    // 1. 处理标准文本消息 (text)
+    if (parsed.text) {
+      return (parsed.text || "").trim();
+    }
+    
+    // 2. 处理富文本消息 (post)
+    if (parsed.content) {
+      const texts: string[] = [];
+      const traverse = (obj: any) => {
+        if (!obj) return;
+        if (typeof obj === "string") return;
+        
+        if (Array.isArray(obj)) {
+          obj.forEach(traverse);
+        } else if (typeof obj === "object") {
+          if (obj.tag === "text" && obj.text) {
+            texts.push(obj.text);
+          } else if (obj.tag === "a") {
+            const linkText = obj.text || "链接";
+            texts.push(`${linkText}(${obj.href || ""})`);
+          } else if (obj.tag === "at") {
+            texts.push(obj.user_name || "@某人");
+          } else if (obj.tag === "img") {
+            texts.push("[图片]");
+          } else {
+            // 递归处理其他可能的嵌套结构
+            Object.values(obj).forEach(traverse);
+          }
+        }
+      };
+      traverse(parsed.content);
+      if (texts.length > 0) return texts.join("").trim();
+    }
+
     return (parsed.text || "").trim();
   } catch {
     return content.trim();

@@ -109,6 +109,22 @@ export async function handleCommand(
     return { handled: true, reply: result.message };
   }
 
+  // 9. 工作目录管理
+  if (trimmed === "/cwd") {
+    const current = callbacks.getWorkdir(chatId, source);
+    return { handled: true, reply: `📍 当前工作目录：\n\`${current}\`` };
+  }
+
+  if (trimmed.startsWith("/cwd ")) {
+    const newDir = trimmed.slice("/cwd ".length).trim();
+    if (!newDir) {
+      const current = callbacks.getWorkdir(chatId, source);
+      return { handled: true, reply: `📍 当前工作目录：\n\`${current}\`` };
+    }
+    callbacks.setWorkdir(chatId, source, newDir);
+    return { handled: true, reply: `✅ 已切换工作目录至：\n\`${newDir}\`\n\n接下来的对话将在此目录下进行。` };
+  }
+
   return { handled: false };
 }
 
@@ -119,6 +135,8 @@ function formatHelp(): string {
     "/new — 开启新窗口（解绑当前）",
     "/chats — 列出最近的历史会话",
     "/resume 编号 — 切回到指定历史会话",
+    "/cwd — 查看当前工作目录",
+    "/cwd <路径> — 切换工作目录",
     "/stop — 停止正在运行的任务",
     "/retry — 重新执行最后一次提问",
     "/reset — 停止任务并重置记忆",
@@ -127,7 +145,7 @@ function formatHelp(): string {
     "/help — 显示此帮助",
     "",
     "示例：/resume 1",
-    "示例：/model",
+    "示例：/cwd /root/my-project",
   ].join("\n");
 }
 

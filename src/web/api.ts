@@ -73,6 +73,7 @@ export function chatRouter(): Router {
       id: generateId(),
       title: "新对话",
       sessionId: null,
+      workdir: null,
       source: "web",
       chatId: null,
       messages: [],

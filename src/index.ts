@@ -155,6 +155,7 @@ function getOrCreateChannelSession(source: string, chatId: string): db.ChatSessi
     id: generateId(),
     title: "新对话",
     sessionId: null,
+    workdir: null,
     source,
     chatId,
     messages: [],
@@ -226,6 +227,7 @@ async function generateReply(
       mode: currentSessionId ? "resume" : "new",
       sessionId: currentSessionId || null,
       dbSessionId: dbSession.id,
+      workdir: dbSession.workdir || getWorkdir(),
       userTextChars: userText.length,
       promptChars: prompt.length,
       ...(shouldLogContent ? { userText: rawLogString(userText) } : {}),
@@ -241,7 +243,7 @@ async function generateReply(
     }, getProviderTimeoutMs());
 
     let result = await getProvider().run({
-      workdir: getWorkdir(),
+      workdir: dbSession.workdir || getWorkdir(),
       sandbox: getSandbox(),
       model: getCurrentModel(),
       prompt,
@@ -273,7 +275,7 @@ ${userText}`;
         }
 
         return await getProvider().run({
-          workdir: getWorkdir(),
+          workdir: dbSession.workdir || getWorkdir(),
           sandbox: getSandbox(),
           model: getCurrentModel(),
           prompt: reconstructedPrompt,
@@ -296,6 +298,7 @@ ${userText}`;
       id: dbSession.id,
       title: dbSession.title,
       sessionId: result.sessionId || dbSession.sessionId,
+      workdir: dbSession.workdir,
       updatedAt: Date.now(),
     });
 
@@ -411,6 +414,21 @@ const channelCallbacks: ChannelCallbacks = {
   switchProvider: handleSwitchProvider,
   listModels,
   switchModel: handleSwitchModel,
+  getWorkdir: (chatId, source) => {
+    const session = getOrCreateChannelSession(source, chatId);
+    return session.workdir || getWorkdir();
+  },
+  setWorkdir: (chatId, source, workdir) => {
+    const session = getOrCreateChannelSession(source, chatId);
+    db.updateSession({
+      id: session.id,
+      title: session.title,
+      sessionId: session.sessionId,
+      workdir: workdir,
+      updatedAt: Date.now(),
+    });
+    logger.info("reply.workdir_updated", { chatId, source, workdir });
+  },
 };
 
 // --- Startup ---

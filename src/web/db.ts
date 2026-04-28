@@ -6,6 +6,7 @@ export type ChatSession = {
   id: string;
   title: string;
   sessionId: string | null;
+  workdir: string | null;
   source: string;
   chatId: string | null;
   messages: Array<{ role: "user" | "assistant"; content: string; metadata?: string | null }>;
@@ -36,6 +37,7 @@ db.exec(`
     id         TEXT PRIMARY KEY,
     title      TEXT NOT NULL DEFAULT '新对话',
     session_id TEXT,
+    workdir    TEXT,
     source     TEXT NOT NULL DEFAULT 'web',
     chat_id    TEXT,
     created_at INTEGER NOT NULL,
@@ -60,6 +62,9 @@ try {
   db.exec(`ALTER TABLE sessions ADD COLUMN chat_id TEXT`);
 } catch (_) {}
 try {
+  db.exec(`ALTER TABLE sessions ADD COLUMN workdir TEXT`);
+} catch (_) {}
+try {
   db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`);
 } catch (_) {}
 
@@ -76,7 +81,7 @@ const stmts = {
   `),
 
   getSession: db.prepare(`
-    SELECT id, title, session_id AS sessionId, source, chat_id AS chatId,
+    SELECT id, title, session_id AS sessionId, workdir, source, chat_id AS chatId,
            created_at AS createdAt, updated_at AS updatedAt
     FROM sessions WHERE id = ?
   `),
@@ -87,12 +92,12 @@ const stmts = {
   `),
 
   insertSession: db.prepare(`
-    INSERT INTO sessions (id, title, session_id, source, chat_id, created_at, updated_at)
-    VALUES (@id, @title, @sessionId, @source, @chatId, @createdAt, @updatedAt)
+    INSERT INTO sessions (id, title, session_id, workdir, source, chat_id, created_at, updated_at)
+    VALUES (@id, @title, @sessionId, @workdir, @source, @chatId, @createdAt, @updatedAt)
   `),
 
   updateSession: db.prepare(`
-    UPDATE sessions SET title = @title, session_id = @sessionId, updated_at = @updatedAt
+    UPDATE sessions SET title = @title, session_id = @sessionId, workdir = @workdir, updated_at = @updatedAt
     WHERE id = @id
   `),
 
@@ -103,7 +108,7 @@ const stmts = {
   `),
 
   findBySourceChat: db.prepare(`
-    SELECT id, title, session_id AS sessionId, source, chat_id AS chatId,
+    SELECT id, title, session_id AS sessionId, workdir, source, chat_id AS chatId,
            created_at AS createdAt, updated_at AS updatedAt
     FROM sessions WHERE source = ? AND chat_id = ?
     ORDER BY updated_at DESC LIMIT 1
@@ -138,6 +143,7 @@ export function getSession(id: string): ChatSession | null {
         id: string;
         title: string;
         sessionId: string | null;
+        workdir: string | null;
         source: string;
         chatId: string | null;
         createdAt: number;
@@ -160,6 +166,7 @@ export function createSession(session: ChatSession): void {
     id: session.id,
     title: session.title,
     sessionId: session.sessionId,
+    workdir: session.workdir || null,
     source: session.source || "web",
     chatId: session.chatId || null,
     createdAt: session.createdAt,
@@ -176,6 +183,7 @@ export function findSessionBySourceChat(
         id: string;
         title: string;
         sessionId: string | null;
+        workdir: string | null;
         source: string;
         chatId: string | null;
         createdAt: number;
@@ -195,12 +203,15 @@ export function updateSession(session: {
   id: string;
   title: string;
   sessionId: string | null;
+  workdir?: string | null;
   updatedAt: number;
 }): void {
+  const existing = getSession(session.id);
   stmts.updateSession.run({
     id: session.id,
     title: session.title,
     sessionId: session.sessionId,
+    workdir: session.workdir !== undefined ? session.workdir : (existing?.workdir || null),
     updatedAt: session.updatedAt,
   });
 }

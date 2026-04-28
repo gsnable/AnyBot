@@ -61,6 +61,8 @@ export interface ChannelCallbacks {
   switchProvider: (providerType: string) => { success: boolean; message: string };
   listModels: () => ModelInfo[];
   switchModel: (modelId: string) => { success: boolean; message: string };
+  getWorkdir: (chatId: string, source: string) => string;
+  setWorkdir: (chatId: string, source: string, workdir: string) => void;
 }
 
 export interface IChannel {

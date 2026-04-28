@@ -182,11 +182,6 @@ export class FeishuChannel implements IChannel {
     if (this.handledMessageIds.has(message.message_id)) return;
     this.handledMessageIds.add(message.message_id);
 
-    if (message.message_type !== "text" && message.message_type !== "image" && message.message_type !== "file") {
-      await sendText(client, message.chat_id, "目前只支持文本、图片和文件消息。");
-      return;
-    }
-
     const isGroup = message.chat_type === "group" || message.chat_type === "group_chat";
     if (!isGroup && !config.ownerChatId) {
       config.ownerChatId = message.chat_id;
@@ -208,7 +203,10 @@ export class FeishuChannel implements IChannel {
       return;
     }
 
-    void this.processTextMessage(client, config, message);
+    if (message.message_type === "text" || message.message_type === "post") {
+      void this.processTextMessage(client, config, message);
+      return;
+    }
   }
 
   private async processTextMessage(
