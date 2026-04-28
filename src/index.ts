@@ -174,6 +174,7 @@ async function generateReply(
   imagePaths: string[] = [],
   source: string = "unknown",
   callbacks?: ChannelCallbacks,
+  replyToId?: string,
 ): Promise<string> {
   try {
     const dbSession = getOrCreateChannelSession(source, chatId);
@@ -367,8 +368,8 @@ function handleSwitchModel(modelId: string) {
 }
 
 const channelCallbacks: ChannelCallbacks = {
-  generateReply: (chatId, userText, imagePaths, source) =>
-    generateReply(chatId, userText, imagePaths, source, channelCallbacks),
+  generateReply: (chatId, userText, imagePaths, source, replyToId) =>
+    generateReply(chatId, userText, imagePaths, source, channelCallbacks, replyToId),
   retryReply: async (chatId, source) => {
     const dbSession = getOrCreateChannelSession(source || "unknown", chatId);
     const lastUserMsg = [...dbSession.messages].reverse().find(m => m.role === "user");
@@ -390,7 +391,7 @@ const channelCallbacks: ChannelCallbacks = {
     }
     return await generateReply(chatId, lastUserMsg.content, imagePaths, source, channelCallbacks);
   },
-  sendProgress: async (chatId, message) => {},
+  sendProgress: async (chatId, message, replyToId) => {},
   resetSession: resetChatSession,
   stopSession: async (chatId) => {
     const p = getProvider();

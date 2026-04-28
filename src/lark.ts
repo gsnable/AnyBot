@@ -131,17 +131,35 @@ function toInteractiveCardContent(text: string, title?: string): string {
 
 async function sendPlainText(
   client: Lark.Client,
-  chatId: string,
+  receiveId: string,
   text: string,
+  replyToId?: string,
 ): Promise<void> {
-  await client.im.message.create({
-    params: { receive_id_type: "chat_id" },
-    data: {
-      receive_id: chatId,
-      msg_type: "text",
-      content: JSON.stringify({ text }),
-    },
-  });
+  if (replyToId) {
+    const res = await client.im.message.reply({
+      path: { message_id: replyToId },
+      data: {
+        msg_type: "text",
+        content: JSON.stringify({ text }),
+      },
+    });
+    logger.info("lark.api.reply_result", { 
+      receiveId, 
+      replyToId, 
+      code: res.code, 
+      msg: res.msg, 
+      data: JSON.stringify(res.data) 
+    });
+  } else {
+    await client.im.message.create({
+      params: { receive_id_type: "chat_id" },
+      data: {
+        receive_id: receiveId,
+        msg_type: "text",
+        content: JSON.stringify({ text }),
+      },
+    });
+  }
 }
 
 const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024;
@@ -202,9 +220,11 @@ export async function sendText(
   chatId: string,
   text: string,
   title?: string,
+  replyToId?: string,
 ): Promise<void> {
   logger.debug("lark.send_text", {
     chatId,
+    replyToId,
     textChars: text.length,
     ...(shouldLogContent
       ? {
@@ -212,14 +232,42 @@ export async function sendText(
         }
       : {}),
   });
-  await client.im.message.create({
-    params: { receive_id_type: "chat_id" },
-    data: {
-      receive_id: chatId,
-      msg_type: "interactive",
-      content: toInteractiveCardContent(text, title),
-    },
-  }).catch(async (error: unknown) => {
+
+  const content = toInteractiveCardContent(text, title);
+
+  try {
+    if (replyToId) {
+      const res = await client.im.message.reply({
+        path: { message_id: replyToId },
+        data: {
+          msg_type: "interactive",
+          content,
+        },
+      });
+      logger.info("lark.api.card_reply_result", { 
+        chatId, 
+        replyToId, 
+        code: res.code, 
+        msg: res.msg, 
+        data: JSON.stringify(res.data) 
+      });
+    } else {
+      const res = await client.im.message.create({
+        params: { receive_id_type: "chat_id" },
+        data: {
+          receive_id: chatId,
+          msg_type: "interactive",
+          content,
+        },
+      });
+      logger.info("lark.api.card_create_result", { 
+        chatId, 
+        code: res.code, 
+        msg: res.msg, 
+        data: JSON.stringify(res.data) 
+      });
+    }
+  } catch (error: unknown) {
     if (!isCardContentError(error)) {
       throw error;
     }
@@ -227,8 +275,8 @@ export async function sendText(
       chatId,
       error: (error as { message?: string })?.message || String(error),
     });
-    await sendPlainText(client, chatId, formatCardFallbackText(text));
-  });
+    await sendPlainText(client, chatId, formatCardFallbackText(text), replyToId);
+  }
 }
 
 export async function sendImage(
@@ -303,7 +351,7 @@ export async function sendFile(
     throw new Error(`上传文件失败：${filePath}`);
   }
 
-  await client.im.message.create({
+  const res = await client.im.message.create({
     params: { receive_id_type: "chat_id" },
     data: {
       receive_id: chatId,
@@ -317,6 +365,8 @@ export async function sendFile(
     filePath,
     fileKey,
     fileSize: fileStat.size,
+    code: res.code,
+    msg: res.msg
   });
 }
 
@@ -325,10 +375,12 @@ export async function sendReply(
   chatId: string,
   reply: string,
   workdir: string,
+  replyToId?: string,
 ): Promise<void> {
   const payload = parseReplyPayload(reply, workdir);
   logger.info("lark.send_reply", {
     chatId,
+    replyToId,
     textChars: payload.text.length,
     imageCount: payload.imagePaths.length,
     fileCount: payload.filePaths.length,
@@ -341,9 +393,9 @@ export async function sendReply(
   });
 
   if (payload.text) {
-    await sendText(client, chatId, payload.text);
+    await sendText(client, chatId, payload.text, undefined, replyToId);
   } else if (payload.imagePaths.length > 0 || payload.filePaths.length > 0) {
-    await sendText(client, chatId, "请查收~");
+    await sendText(client, chatId, "请查收~", undefined, replyToId);
   }
 
   for (const imagePath of payload.imagePaths) {
@@ -355,7 +407,7 @@ export async function sendReply(
   }
 
   if (!payload.text && payload.imagePaths.length === 0 && payload.filePaths.length === 0) {
-    await sendText(client, chatId, reply);
+    await sendText(client, chatId, reply, undefined, replyToId);
   }
 }
 

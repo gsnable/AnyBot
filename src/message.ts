@@ -48,7 +48,10 @@ export function parseIncomingText(content: string): string {
 }
 
 export function sanitizeUserText(text: string): string {
-  return text.replace(/<at[^>]*>.*?<\/at>/g, "").trim();
+  return text
+    .replace(/<at[^>]*>.*?<\/at>/g, "") // 移除飞书标准 at 标签
+    .replace(/^@\S+\s+/, "")            // 移除开头的纯文本 @名字
+    .trim();
 }
 
 export function parseIncomingImageKey(content: string): string | null {
