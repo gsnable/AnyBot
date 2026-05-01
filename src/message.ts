@@ -28,13 +28,7 @@ export function parseIncomingText(content: string): string {
             const linkText = obj.text || "链接";
             texts.push(`${linkText}(${obj.href || ""})`);
           } else if (obj.tag === "at") {
-            const userId = obj.user_id || obj.open_id || "";
-            const userName = obj.user_name || "某人";
-            if (userId) {
-              texts.push(`@{${userName}|${userId}}`);
-            } else {
-              texts.push(`@${userName}`);
-            }
+            texts.push(obj.user_name || "@某人");
           } else if (obj.tag === "img") {
             texts.push("[图片]");
           } else {
@@ -54,10 +48,7 @@ export function parseIncomingText(content: string): string {
 }
 
 export function sanitizeUserText(text: string): string {
-  return text
-    .replace(/<at[^>]*>.*?<\/at>/g, "") // 移除飞书标准 at 标签
-    .replace(/^@\S+\s+/, "")            // 移除开头的纯文本 @名字
-    .trim();
+  return text.replace(/<at[^>]*>.*?<\/at>/g, "").trim();
 }
 
 export function parseIncomingImageKey(content: string): string | null {

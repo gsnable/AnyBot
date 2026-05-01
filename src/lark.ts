@@ -83,22 +83,19 @@ function splitMarkdownBlocks(text: string): string[] {
 function buildCardElements(text: string, isLarge?: boolean): LarkCardElement[] {
   const blocks = splitMarkdownBlocks(text);
   if (blocks.length === 0) {
-    // 如果包含艾特标签，则不进行全量加粗，防止破坏标签结构
-    const shouldBold = isLarge && !text.includes("<at ");
     return [
       {
         tag: "markdown",
-        content: shouldBold ? `**${text}**` : text,
+        content: isLarge ? `**${text}**` : text,
       },
     ];
   }
 
   return blocks.flatMap((block, index) => {
-    const shouldBold = isLarge && !block.includes("<at ");
     const elements: LarkCardElement[] = [
       {
         tag: "markdown",
-        content: shouldBold ? `**${block}**` : block,
+        content: isLarge ? `**${block}**` : block,
       },
     ];
 
@@ -134,37 +131,17 @@ function toInteractiveCardContent(text: string, title?: string): string {
 
 async function sendPlainText(
   client: Lark.Client,
-  receiveId: string,
+  chatId: string,
   text: string,
-  replyToId?: string,
 ): Promise<void> {
-  const processedText = processMentions(text, "text");
-
-  if (replyToId) {
-    const res = await client.im.message.reply({
-      path: { message_id: replyToId },
-      data: {
-        msg_type: "text",
-        content: JSON.stringify({ text: processedText }),
-      },
-    });
-    logger.info("lark.api.reply_result", { 
-      receiveId, 
-      replyToId, 
-      code: res.code, 
-      msg: res.msg, 
-      data: JSON.stringify(res.data) 
-    });
-  } else {
-    await client.im.message.create({
-      params: { receive_id_type: "chat_id" },
-      data: {
-        receive_id: receiveId,
-        msg_type: "text",
-        content: JSON.stringify({ text: processedText }),
-      },
-    });
-  }
+  await client.im.message.create({
+    params: { receive_id_type: "chat_id" },
+    data: {
+      receive_id: chatId,
+      msg_type: "text",
+      content: JSON.stringify({ text }),
+    },
+  });
 }
 
 const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024;
@@ -194,21 +171,6 @@ function detectLarkFileType(filePath: string): LarkFileType {
   }
 }
 
-function processMentions(text: string, mode: "text" | "card"): string {
-  return text.replace(/@\{([^|]+)\|([^}]+)\}/g, (_, name, id) => {
-    if (id === "all") {
-      return mode === "card" ? '<at id="all"></at>' : '<at all="">所有人</at>';
-    }
-    if (mode === "card") {
-      // 交互式卡片中的 markdown 标签使用 id
-      return `<at id="${id}"></at>`;
-    } else {
-      // 标准文本消息使用 user_id，必须包含用户名才能生效
-      return `<at user_id="${id}">${name}</at>`;
-    }
-  });
-}
-
 function formatCardFallbackText(text: string): string {
   return text.length > 300 ? `${text.slice(0, 300)}...` : text;
 }
@@ -222,7 +184,7 @@ function isCardContentError(error: unknown): boolean {
   };
   const code = maybeError.code ?? maybeError.response?.code;
   const message = maybeError.msg || maybeError.response?.msg || maybeError.message || "";
-  return code === 230028 || code === 230099 || /interactive|card|content|invalid user resource/i.test(message);
+  return code === 230028 || /interactive|card|content/i.test(message);
 }
 
 export function createLarkClients(appId: string, appSecret: string) {
@@ -240,11 +202,9 @@ export async function sendText(
   chatId: string,
   text: string,
   title?: string,
-  replyToId?: string,
 ): Promise<void> {
   logger.debug("lark.send_text", {
     chatId,
-    replyToId,
     textChars: text.length,
     ...(shouldLogContent
       ? {
@@ -252,43 +212,14 @@ export async function sendText(
         }
       : {}),
   });
-
-  const processedText = processMentions(text, "card");
-  const content = toInteractiveCardContent(processedText, title);
-
-  try {
-    if (replyToId) {
-      const res = await client.im.message.reply({
-        path: { message_id: replyToId },
-        data: {
-          msg_type: "interactive",
-          content,
-        },
-      });
-      logger.info("lark.api.card_reply_result", { 
-        chatId, 
-        replyToId, 
-        code: res.code, 
-        msg: res.msg, 
-        data: JSON.stringify(res.data) 
-      });
-    } else {
-      const res = await client.im.message.create({
-        params: { receive_id_type: "chat_id" },
-        data: {
-          receive_id: chatId,
-          msg_type: "interactive",
-          content,
-        },
-      });
-      logger.info("lark.api.card_create_result", { 
-        chatId, 
-        code: res.code, 
-        msg: res.msg, 
-        data: JSON.stringify(res.data) 
-      });
-    }
-  } catch (error: unknown) {
+  await client.im.message.create({
+    params: { receive_id_type: "chat_id" },
+    data: {
+      receive_id: chatId,
+      msg_type: "interactive",
+      content: toInteractiveCardContent(text, title),
+    },
+  }).catch(async (error: unknown) => {
     if (!isCardContentError(error)) {
       throw error;
     }
@@ -296,8 +227,8 @@ export async function sendText(
       chatId,
       error: (error as { message?: string })?.message || String(error),
     });
-    await sendPlainText(client, chatId, formatCardFallbackText(text), replyToId);
-  }
+    await sendPlainText(client, chatId, formatCardFallbackText(text));
+  });
 }
 
 export async function sendImage(
@@ -372,7 +303,7 @@ export async function sendFile(
     throw new Error(`上传文件失败：${filePath}`);
   }
 
-  const res = await client.im.message.create({
+  await client.im.message.create({
     params: { receive_id_type: "chat_id" },
     data: {
       receive_id: chatId,
@@ -386,8 +317,6 @@ export async function sendFile(
     filePath,
     fileKey,
     fileSize: fileStat.size,
-    code: res.code,
-    msg: res.msg
   });
 }
 
@@ -396,12 +325,10 @@ export async function sendReply(
   chatId: string,
   reply: string,
   workdir: string,
-  replyToId?: string,
 ): Promise<void> {
   const payload = parseReplyPayload(reply, workdir);
   logger.info("lark.send_reply", {
     chatId,
-    replyToId,
     textChars: payload.text.length,
     imageCount: payload.imagePaths.length,
     fileCount: payload.filePaths.length,
@@ -414,9 +341,9 @@ export async function sendReply(
   });
 
   if (payload.text) {
-    await sendText(client, chatId, payload.text, undefined, replyToId);
+    await sendText(client, chatId, payload.text);
   } else if (payload.imagePaths.length > 0 || payload.filePaths.length > 0) {
-    await sendText(client, chatId, "请查收~", undefined, replyToId);
+    await sendText(client, chatId, "请查收~");
   }
 
   for (const imagePath of payload.imagePaths) {
@@ -428,7 +355,7 @@ export async function sendReply(
   }
 
   if (!payload.text && payload.imagePaths.length === 0 && payload.filePaths.length === 0) {
-    await sendText(client, chatId, reply, undefined, replyToId);
+    await sendText(client, chatId, reply);
   }
 }
 

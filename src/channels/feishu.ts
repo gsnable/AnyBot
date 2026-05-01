@@ -70,11 +70,11 @@ export class FeishuChannel implements IChannel {
 
     // 重新包装回调：注入飞书特有的进度发送逻辑
     const originalSendProgress = callbacks.sendProgress;
-    callbacks.sendProgress = async (chatId, text, replyToId) => {
+    callbacks.sendProgress = async (chatId, text) => {
       if (this.larkClient) {
-        await sendText(this.larkClient, chatId, text, "系统提示", replyToId);
+        await sendText(this.larkClient, chatId, text, "系统提示");
       }
-      if (originalSendProgress) await originalSendProgress(chatId, text, replyToId);
+      if (originalSendProgress) await originalSendProgress(chatId, text);
     };
 
     const { client, wsClient, EventDispatcher } = createLarkClients(
@@ -86,10 +86,7 @@ export class FeishuChannel implements IChannel {
 
     const dispatcher = new EventDispatcher({}).register({
       "im.message.receive_v1": (event: {
-        sender: { 
-          sender_type: string;
-          sender_id?: { open_id?: string; user_id?: string };
-        };
+        sender: { sender_type: string };
         message: {
           message_id: string;
           create_time?: string;
@@ -141,10 +138,7 @@ export class FeishuChannel implements IChannel {
   }
 
   private async handleMessage(event: {
-    sender: { 
-      sender_type: string;
-      sender_id?: { open_id?: string; user_id?: string };
-    };
+    sender: { sender_type: string };
     message: {
       message_id: string;
       create_time?: string;
@@ -158,12 +152,6 @@ export class FeishuChannel implements IChannel {
     const { sender, message } = event;
     const client = this.larkClient!;
     const config = this.config!;
-    const senderOpenId = sender.sender_id?.open_id;
-
-    // 【全量捕获】不加任何修饰，直接打印原始 JSON，看看 123456789 到底在哪
-    logger.info("feishu.RAW_EVENT_FULL_DEBUG", { 
-      raw: JSON.stringify(event) 
-    });
 
     logger.info("feishu.message.received", {
       messageId: message.message_id,
@@ -171,7 +159,6 @@ export class FeishuChannel implements IChannel {
       chatType: message.chat_type,
       messageType: message.message_type,
       senderType: sender.sender_type,
-      senderOpenId,
       mentionCount: message.mentions?.length || 0,
       ...(shouldLogContent
         ? { larkContent: rawLogString(message.content) }
@@ -195,7 +182,7 @@ export class FeishuChannel implements IChannel {
     if (this.handledMessageIds.has(message.message_id)) return;
     this.handledMessageIds.add(message.message_id);
 
-    const isGroup = message.chat_type === "group" || message.chat_type === "group_chat" || message.chat_type === "goup";
+    const isGroup = message.chat_type === "group" || message.chat_type === "group_chat";
     if (!isGroup && !config.ownerChatId) {
       config.ownerChatId = message.chat_id;
       updateChannelConfig("feishu", { ownerChatId: message.chat_id });
@@ -203,13 +190,7 @@ export class FeishuChannel implements IChannel {
     }
 
     if (isGroup) {
-      if (!this.shouldReplyInGroup(message.mentions)) {
-        logger.warn("feishu.GROUP_ID_MISMATCH_BYPASSING", { 
-          received: JSON.stringify(message.mentions),
-          configured: config.botOpenId
-        });
-        return;
-      }
+      if (!this.shouldReplyInGroup(message.mentions)) return;
     }
 
     if (message.message_type === "image") {
@@ -237,13 +218,13 @@ export class FeishuChannel implements IChannel {
     const userText = sanitizeUserText(rawText);
 
     if (!userText) {
-      await sendText(client, message.chat_id, "请直接发送文字问题。", undefined, message.message_id);
+      await sendText(client, message.chat_id, "请直接发送文字问题。");
       return;
     }
 
     const cmd = await handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
     if (cmd.handled) {
-      if (cmd.reply) await sendText(client, message.chat_id, cmd.reply, "系统提示", message.message_id);
+      if (cmd.reply) await sendText(client, message.chat_id, cmd.reply, "系统提示");
       return;
     }
 
@@ -263,15 +244,8 @@ export class FeishuChannel implements IChannel {
           userText,
           undefined,
           "feishu",
-          message.message_id,
         );
-
-        let finalReply = reply;
-        if (message.chat_id.startsWith("oc_")) {
-          finalReply = `@{所有人|all}\n${reply}`;
-        }
-
-        await sendReply(client, message.chat_id, finalReply, getWorkdir(), message.message_id);
+        await sendReply(client, message.chat_id, reply, getWorkdir());
       } catch (error) {
         logger.error("feishu.text.failed", {
           messageId: message.message_id,
@@ -279,7 +253,7 @@ export class FeishuChannel implements IChannel {
           error,
         });
         const { formatProviderError } = await import("../index.js");
-        await sendText(client, message.chat_id, formatProviderError(error), "系统提示", message.message_id);
+        await sendText(client, message.chat_id, formatProviderError(error), "系统提示");
       }
     });
   }
@@ -316,13 +290,8 @@ export class FeishuChannel implements IChannel {
           userText,
           [imagePath],
           "feishu",
-          message.message_id,
         );
-        let finalReply = reply;
-        if (message.chat_id.startsWith("oc_")) {
-          finalReply = `@{所有人|all}\n${reply}`;
-        }
-        await sendReply(client, message.chat_id, finalReply, getWorkdir(), message.message_id);
+        await sendReply(client, message.chat_id, reply, getWorkdir());
       } catch (error) {
         logger.error("feishu.image.failed", {
           messageId: message.message_id,
@@ -330,7 +299,7 @@ export class FeishuChannel implements IChannel {
           error,
         });
         const { formatProviderError } = await import("../index.js");
-        await sendText(client, message.chat_id, formatProviderError(error), "系统提示", message.message_id);
+        await sendText(client, message.chat_id, formatProviderError(error), "系统提示");
       }
     });
   }
@@ -369,13 +338,8 @@ export class FeishuChannel implements IChannel {
           userText,
           [filePath],
           "feishu",
-          message.message_id,
         );
-        let finalReply = reply;
-        if (message.chat_id.startsWith("oc_")) {
-          finalReply = `@{所有人|all}\n${reply}`;
-        }
-        await sendReply(client, message.chat_id, finalReply, getWorkdir(), message.message_id);
+        await sendReply(client, message.chat_id, reply, getWorkdir());
       } catch (error) {
         logger.error("feishu.file.failed", {
           messageId: message.message_id,
@@ -383,22 +347,13 @@ export class FeishuChannel implements IChannel {
           error,
         });
         const { formatProviderError } = await import("../index.js");
-        await sendText(client, message.chat_id, formatProviderError(error), "系统提示", message.message_id);
+        await sendText(client, message.chat_id, formatProviderError(error), "系统提示");
       }
     });
   }
 
   private shouldReplyInGroup(mentions?: Array<{ id?: { open_id?: string } }>): boolean {
     if (this.config?.groupChatMode === "all") return true;
-    
-    // 强制打印，不抓到证据不罢休
-    if (mentions && mentions.length > 0) {
-      logger.info("feishu.REAL_ID_PROBE", { 
-        received: mentions[0].id?.open_id, 
-        config: this.config?.botOpenId 
-      });
-    }
-
     // mention 模式
     return !!mentions?.some((m) => m.id?.open_id === this.config?.botOpenId);
   }

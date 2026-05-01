@@ -73,6 +73,10 @@
 ---
 
 ## 7. 系统底层补丁
+- **僵尸进程避坑指南 (Zombie Process Trap)**：
+    - **症状**：修改代码后，无论怎么通过正常脚本（如 `npm run bot:stop` / `start`）重启服务，新逻辑始终不生效，甚至出现诡异的执行结果（如消息路由错误、命令被旧逻辑拦截）。
+    - **根因**：之前启动的 `tsx` 或 `node` 进程脱离了管理脚本的 PID 追踪，变成了“僵尸/孤儿进程”，依然在后台占用端口或监听 Webhook。
+    - **解决**：必须使用 `ps aux | grep -E "tsx|index.ts" | grep -v grep` 揪出所有相关的老进程，并通过 `kill -9` 强杀清理干净，再重新启动服务。
 - **依赖库**：已安装 `libsecret-1-0`，解决 Keychain 报错。
 - **JSON 解析**：`gemini-cli.ts` 已增加正则滤网，自动剔除Gemini启动时的警告废话（YOLO mode 等）。
 

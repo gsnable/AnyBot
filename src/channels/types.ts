@@ -49,9 +49,8 @@ export interface ChannelCallbacks {
     userText: string,
     imagePaths?: string[],
     source?: string,
-    replyToId?: string,
   ) => Promise<string>;
-  sendProgress: (chatId: string, message: string, replyToId?: string) => Promise<void>;
+  sendProgress: (chatId: string, message: string) => Promise<void>;
   retryReply: (chatId: string, source?: string) => Promise<string>;
   resetSession: (chatId: string, source?: string) => void;
   stopSession: (chatId: string) => Promise<void>;
