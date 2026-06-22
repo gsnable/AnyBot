@@ -1,4 +1,5 @@
 import { spawn, execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import type {
   IProvider,
   RunOptions,
@@ -87,6 +88,9 @@ export class GeminiCliProvider implements IProvider {
     } = opts;
     const startedAt = Date.now();
 
+    const isAgy = this.bin.includes("agy") || this.bin === "antigravity-cli";
+    const effectiveSessionId = isAgy ? (sessionId || randomUUID()) : sessionId;
+
     // 将图片路径转换为 @ 语法并追加到 Prompt
     let finalPrompt = prompt;
     if (imagePaths.length > 0) {
@@ -94,18 +98,28 @@ export class GeminiCliProvider implements IProvider {
       finalPrompt = `${prompt} ${imageAttachments}`;
     }
 
-    const args: string[] = [
-      "-p", finalPrompt,
-      "--output-format", "json",
-      "--approval-mode", this.approvalMode,
-    ];
-
-    if (model) {
-      args.push("-m", model);
-    }
-
-    if (sessionId) {
-      args.push("-r", sessionId);
+    let args: string[];
+    if (isAgy) {
+      args = [
+        "-p", finalPrompt,
+        "--dangerously-skip-permissions",
+        "--conversation", effectiveSessionId!,
+      ];
+      if (model && model !== "auto") {
+        args.push("--model", model);
+      }
+    } else {
+      args = [
+        "-p", finalPrompt,
+        "--output-format", "json",
+        "--approval-mode", this.approvalMode,
+      ];
+      if (model) {
+        args.push("-m", model);
+      }
+      if (sessionId) {
+        args.push("-r", sessionId);
+      }
     }
 
     logger.info("provider.exec.start", {
@@ -156,6 +170,53 @@ export class GeminiCliProvider implements IProvider {
 
       child.on("close", (code) => {
         if (chatId) this.activeProcesses.delete(chatId);
+
+        if (isAgy) {
+          if (code !== 0) {
+            logger.error("provider.exec.non_zero_exit", {
+              provider: this.type,
+              code,
+              workdir,
+              durationMs: Date.now() - startedAt,
+              stdoutChars: stdout.length,
+              stderrChars: stderr.length,
+              stderrPreview: stderr.slice(0, 400),
+            });
+            reject(new ProviderProcessError(code, stderr || stdout));
+            return;
+          }
+
+          // 过滤掉 Warning: conversation "..." not found.
+          let responseText = stdout;
+          responseText = responseText.replace(/Warning: conversation ".*?" not found\.\r?\n?/gi, "").trim();
+
+          if (!responseText) {
+            logger.error("provider.exec.empty_response", {
+              provider: this.type,
+              workdir,
+              durationMs: Date.now() - startedAt,
+              stdoutChars: stdout.length,
+            });
+            reject(new ProviderEmptyOutputError());
+            return;
+          }
+
+          logger.info("provider.exec.success", {
+            provider: this.type,
+            workdir,
+            durationMs: Date.now() - startedAt,
+            stdoutChars: stdout.length,
+            stderrChars: stderr.length,
+            replyChars: responseText.length,
+            sessionId: effectiveSessionId,
+          });
+
+          resolve({
+            text: responseText,
+            sessionId: effectiveSessionId!,
+          });
+          return;
+        }
 
         // 判定 Session 是否丢失：1. 退出码为 42；2. 或者虽然退出码正常但 stderr 明确报了恢复失败
         const isSessionLost = (code === 42 || code === 0) && 
@@ -255,6 +316,10 @@ export class GeminiCliProvider implements IProvider {
   }
 
   private resolveLatestSessionId(workdir: string): string | null {
+    const isAgy = this.bin.includes("agy") || this.bin === "antigravity-cli";
+    if (isAgy) {
+      return null;
+    }
     try {
       const output = execSync(`${this.bin} --list-sessions`, {
         cwd: workdir,
