@@ -3,7 +3,7 @@
 # 撰写人：王富贵
 
 SOURCE_DIR="/root/.gemini/tmp"
-BACKUP_DIR="/root/AnyBot/.data/gemini_backups"
+BACKUP_DIR="/root/AnyBot-Dev/.data/gemini_backups"
 
 # 创建备份目录
 mkdir -p "$BACKUP_DIR"

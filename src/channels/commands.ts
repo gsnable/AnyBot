@@ -1,3 +1,4 @@
+import { existsSync, statSync } from "node:fs";
 import type { ChannelCallbacks } from "./types.js";
 
 export interface CommandResult {
@@ -121,6 +122,15 @@ export async function handleCommand(
       const current = callbacks.getWorkdir(chatId, source);
       return { handled: true, reply: `📍 当前工作目录：\n\`${current}\`` };
     }
+
+    try {
+      if (!existsSync(newDir) || !statSync(newDir).isDirectory()) {
+        return { handled: true, reply: `❌ 切换失败：目录 \`${newDir}\` 不存在或不是一个有效的文件夹。` };
+      }
+    } catch (e) {
+      return { handled: true, reply: `❌ 切换失败：无法访问路径 \`${newDir}\`。` };
+    }
+
     callbacks.setWorkdir(chatId, source, newDir);
     return { handled: true, reply: `✅ 已切换工作目录至：\n\`${newDir}\`\n\n接下来的对话将在此目录下进行。` };
   }
