@@ -190,6 +190,29 @@ export class GeminiCliProvider implements IProvider {
           let responseText = stdout;
           responseText = responseText.replace(/Warning: conversation ".*?" not found\.\r?\n?/gi, "").trim();
 
+          // 1. 剔除末尾的工作总结
+          const summaryIndex = responseText.indexOf("***\n\n**工作总结：**");
+          if (summaryIndex !== -1) {
+            responseText = responseText.substring(0, summaryIndex);
+          } else {
+            const altSummaryIndex = responseText.indexOf("***\r\n\r\n**工作总结：**");
+            if (altSummaryIndex !== -1) {
+              responseText = responseText.substring(0, altSummaryIndex);
+            }
+          }
+
+          // 2. 剔除开头的思考轨迹 (从第一个中文字符向上寻找行首截取)
+          const firstChineseMatch = responseText.match(/[\u4e00-\u9fa5]/);
+          if (firstChineseMatch && firstChineseMatch.index !== undefined) {
+            let startPos = firstChineseMatch.index;
+            while (startPos > 0 && responseText[startPos - 1] !== "\n") {
+              startPos--;
+            }
+            responseText = responseText.substring(startPos);
+          }
+
+          responseText = responseText.trim();
+
           if (!responseText) {
             logger.error("provider.exec.empty_response", {
               provider: this.type,
