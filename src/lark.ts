@@ -176,15 +176,18 @@ function formatCardFallbackText(text: string): string {
 }
 
 function isCardContentError(error: unknown): boolean {
-  const maybeError = error as {
-    code?: number;
-    msg?: string;
-    message?: string;
-    response?: { code?: number; msg?: string };
-  };
-  const code = maybeError.code ?? maybeError.response?.code;
-  const message = maybeError.msg || maybeError.response?.msg || maybeError.message || "";
-  return code === 230028 || /interactive|card|content/i.test(message);
+  const maybeError = error as any;
+  const code = maybeError.code 
+    ?? maybeError.response?.code 
+    ?? maybeError.response?.data?.code;
+  const message = maybeError.msg 
+    || maybeError.response?.msg 
+    || maybeError.response?.data?.msg 
+    || maybeError.message 
+    || "";
+  return code === 230028 
+    || code === 230099 
+    || /interactive|card|content|imagekey/i.test(message);
 }
 
 export function createLarkClients(appId: string, appSecret: string) {
