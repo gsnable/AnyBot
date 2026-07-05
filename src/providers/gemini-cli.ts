@@ -1,5 +1,8 @@
 import { spawn, execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import type {
   IProvider,
   RunOptions,
@@ -76,6 +79,25 @@ export class GeminiCliProvider implements IProvider {
     ];
   }
 
+  private getDbModTimes(convDir: string): Map<string, number> {
+    const map = new Map<string, number>();
+    try {
+      if (fs.existsSync(convDir)) {
+        const files = fs.readdirSync(convDir);
+        for (const file of files) {
+          if (file.endsWith(".db")) {
+            const filePath = path.join(convDir, file);
+            const stat = fs.statSync(filePath);
+            map.set(file, stat.mtimeMs);
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn("provider.resolve_session.scan_failed", { dir: convDir, error: e });
+    }
+    return map;
+  }
+
   async run(opts: RunOptions): Promise<RunResult> {
     const {
       workdir,
@@ -90,6 +112,13 @@ export class GeminiCliProvider implements IProvider {
 
     const isAgy = this.bin.includes("agy") || this.bin === "antigravity-cli";
     const effectiveSessionId = isAgy ? (sessionId || randomUUID()) : sessionId;
+
+    // Resolve agy conversations directory and scan mod times before execution
+    const geminiDir = process.env.GEMINI_DIR 
+      ? (path.isAbsolute(process.env.GEMINI_DIR) ? process.env.GEMINI_DIR : path.join(os.homedir(), ".gemini"))
+      : path.join(os.homedir(), ".gemini");
+    const convDir = path.join(geminiDir, "antigravity-cli", "conversations");
+    const preDbTimes = isAgy ? this.getDbModTimes(convDir) : new Map<string, number>();
 
     // 将图片路径转换为 @ 语法并追加到 Prompt
     let finalPrompt = prompt;
@@ -224,6 +253,31 @@ export class GeminiCliProvider implements IProvider {
             return;
           }
 
+          // Detect which database was updated or created during the execution
+          let resolvedSessionId = effectiveSessionId!;
+          const postDbTimes = this.getDbModTimes(convDir);
+          let newestTime = 0;
+          let newestFile: string | null = null;
+
+          for (const [file, mtime] of postDbTimes.entries()) {
+            const preTime = preDbTimes.get(file) || 0;
+            if (mtime > preTime) {
+              if (mtime > newestTime) {
+                newestTime = mtime;
+                newestFile = file;
+              }
+            }
+          }
+
+          if (newestFile) {
+            resolvedSessionId = path.basename(newestFile, ".db");
+            logger.info("provider.exec.resolved_session_id", {
+              provider: this.type,
+              previousId: effectiveSessionId,
+              resolvedId: resolvedSessionId,
+            });
+          }
+
           logger.info("provider.exec.success", {
             provider: this.type,
             workdir,
@@ -231,12 +285,12 @@ export class GeminiCliProvider implements IProvider {
             stdoutChars: stdout.length,
             stderrChars: stderr.length,
             replyChars: responseText.length,
-            sessionId: effectiveSessionId,
+            sessionId: resolvedSessionId,
           });
 
           resolve({
             text: responseText,
-            sessionId: effectiveSessionId!,
+            sessionId: resolvedSessionId,
           });
           return;
         }
