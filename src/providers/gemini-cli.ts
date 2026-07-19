@@ -134,8 +134,30 @@ export class GeminiCliProvider implements IProvider {
         "--dangerously-skip-permissions",
         "--conversation", effectiveSessionId!,
       ];
-      if (model && model !== "auto") {
-        args.push("--model", model);
+      let agyModel = model;
+      if (agyModel && agyModel !== "auto") {
+        const lowerModel = agyModel.toLowerCase();
+        if (lowerModel.includes("pro")) {
+          agyModel = "Gemini 3.1 Pro (Low)";
+        } else if (lowerModel.includes("flash")) {
+          agyModel = "Gemini 3.5 Flash (Medium)";
+        } else if (lowerModel.includes("sonnet")) {
+          agyModel = "Claude Sonnet 4.6 (Thinking)";
+        } else if (lowerModel.includes("opus")) {
+          agyModel = "Claude Opus 4.6 (Thinking)";
+        } else if (
+          lowerModel.startsWith("gemini") || 
+          lowerModel.startsWith("claude") || 
+          lowerModel.startsWith("gpt")
+        ) {
+          // 如果本身就是模型全名，保留原样
+        } else {
+          // 否则清空，以便 agy 自动使用 settings 中的默认模型，防止因无效模型名崩溃
+          agyModel = undefined;
+        }
+      }
+      if (agyModel) {
+        args.push("--model", agyModel);
       }
     } else {
       args = [
