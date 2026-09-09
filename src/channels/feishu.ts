@@ -246,8 +246,11 @@ export class FeishuChannel implements IChannel {
     if (cmd.handled) {
       if (cmd.reply) {
         if (cmd.replaceCurrent && event?.context?.open_message_id) {
-          const { updateText } = await import("../lark.js");
+          const { updateText, toInteractiveCardObject } = await import("../lark.js");
+          // 发送 patch 请求确保远端更新
           await updateText(client, event.context.open_message_id, cmd.reply, "系统提示");
+          // 同时返回给客户端新的卡片对象，避免客户端清除 loading 状态时发生回滚覆盖
+          return toInteractiveCardObject(cmd.reply, "系统提示");
         } else {
           await sendText(client, chatId, cmd.reply, "系统提示");
         }

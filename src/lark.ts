@@ -184,13 +184,13 @@ function buildCardElements(text: string, isLarge?: boolean): LarkCardElement[] {
   return elements;
 }
 
-function toInteractiveCardContent(text: string, title?: string): string {
+export function toInteractiveCardObject(text: string, title?: string): any {
   const card: any = {
     config: {
       wide_screen_mode: true,
       enable_forward: true,
     },
-    elements: buildCardElements(text, !title), // 没标题时开启放大模式
+    elements: buildCardElements(text, !title),
   };
 
   if (title) {
@@ -202,8 +202,11 @@ function toInteractiveCardContent(text: string, title?: string): string {
       template: "blue",
     };
   }
+  return card;
+}
 
-  return JSON.stringify(card);
+function toInteractiveCardContent(text: string, title?: string): string {
+  return JSON.stringify(toInteractiveCardObject(text, title));
 }
 
 async function sendPlainText(
