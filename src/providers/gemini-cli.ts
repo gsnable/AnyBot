@@ -18,6 +18,57 @@ import {
 } from "./codex.js";
 import { logger } from "../logger.js";
 
+// ------------------------------------------------------------------
+// Model Resolver Cache
+// ------------------------------------------------------------------
+let cachedModels: { [key: string]: string } = {};
+let cachedModelsExpiry = 0;
+
+function resolveAgyModel(bin: string, userModel: string): string | undefined {
+  const lower = userModel.toLowerCase();
+  
+  if (lower.startsWith("gemini-") || lower.startsWith("claude-") || lower.startsWith("gpt-") || 
+      lower.includes("(") || lower.includes(")")) {
+    return userModel;
+  }
+
+  const now = Date.now();
+  if (now > cachedModelsExpiry) {
+    try {
+      const out = execSync(`${bin} models`, { encoding: "utf8", stdio: "pipe" });
+      const lines = out.split("\n").map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith("Fetching") && !l.startsWith("⠋") && !l.startsWith("⠙"));
+      const newCache: { [key: string]: string } = {};
+      for (const line of lines) {
+        const id = line.split(/\s+/)[0];
+        if (id) {
+          if (!newCache["flash"] && id.includes("flash")) newCache["flash"] = id;
+          if (!newCache["pro"] && id.includes("pro")) newCache["pro"] = id;
+          if (!newCache["sonnet"] && id.includes("sonnet")) newCache["sonnet"] = id;
+          if (!newCache["opus"] && id.includes("opus")) newCache["opus"] = id;
+        }
+      }
+      cachedModels = newCache;
+      cachedModelsExpiry = now + 12 * 60 * 60 * 1000;
+    } catch (e) {
+      logger.warn("Failed to fetch models from agy, falling back to defaults", { error: String(e) });
+      cachedModels = {
+        "pro": "Gemini 3.1 Pro (Low)",
+        "flash": "Gemini 3.5 Flash (Medium)",
+        "sonnet": "Claude Sonnet 4.6 (Thinking)",
+        "opus": "Claude Opus 4.6 (Thinking)",
+      };
+      cachedModelsExpiry = now + 60 * 1000;
+    }
+  }
+
+  if (lower.includes("pro")) return cachedModels["pro"];
+  if (lower.includes("flash")) return cachedModels["flash"];
+  if (lower.includes("sonnet")) return cachedModels["sonnet"];
+  if (lower.includes("opus")) return cachedModels["opus"];
+  
+  return undefined;
+}
+
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.PROVIDER_TIMEOUT_MS || "600000", 10);
 
 interface GeminiJsonOutput {
@@ -136,25 +187,9 @@ export class GeminiCliProvider implements IProvider {
       ];
       let agyModel = model;
       if (agyModel && agyModel !== "auto") {
-        const lowerModel = agyModel.toLowerCase();
-        if (lowerModel.includes("pro")) {
-          agyModel = "Gemini 3.1 Pro (Low)";
-        } else if (lowerModel.includes("flash")) {
-          agyModel = "Gemini 3.5 Flash (Medium)";
-        } else if (lowerModel.includes("sonnet")) {
-          agyModel = "Claude Sonnet 4.6 (Thinking)";
-        } else if (lowerModel.includes("opus")) {
-          agyModel = "Claude Opus 4.6 (Thinking)";
-        } else if (
-          lowerModel.startsWith("gemini") || 
-          lowerModel.startsWith("claude") || 
-          lowerModel.startsWith("gpt")
-        ) {
-          // 如果本身就是模型全名，保留原样
-        } else {
-          // 否则清空，以便 agy 自动使用 settings 中的默认模型，防止因无效模型名崩溃
-          agyModel = undefined;
-        }
+        agyModel = resolveAgyModel(this.bin, agyModel);
+      } else {
+        agyModel = undefined;
       }
       if (agyModel) {
         args.push("--model", agyModel);
