@@ -481,6 +481,16 @@ async function main(): Promise<void> {
   logger.info("service.started", {
     activeChannels: channels.map((c) => c.type),
   });
+
+  // 向所有配置了 Owner 的通道发送重启成功通知
+  const notifyPromises = channels.map((c) =>
+    c.sendToOwner("🚀 **AnyBot 重启完毕！**\n系统已恢复在线，您可以继续发送指令或跟我对话了。").catch((e) => {
+      logger.warn(`channel.${c.type}.notify_owner_failed`, {
+        error: (e as Error).message || String(e),
+      });
+    }),
+  );
+  await Promise.all(notifyPromises);
 }
 
 main().catch((error) => {
