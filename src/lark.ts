@@ -311,6 +311,29 @@ export async function sendText(
   });
 }
 
+export async function updateText(
+  client: Lark.Client,
+  messageId: string,
+  text: string,
+  title?: string,
+): Promise<void> {
+  logger.debug("lark.update_text", {
+    messageId,
+    textChars: text.length,
+  });
+  await client.im.message.patch({
+    path: { message_id: messageId },
+    data: {
+      content: toInteractiveCardContent(text, title),
+    },
+  }).catch(async (error: unknown) => {
+    logger.warn("lark.update_text.failed", {
+      messageId,
+      error: (error as { message?: string })?.message || String(error),
+    });
+  });
+}
+
 export async function sendImage(
   client: Lark.Client,
   chatId: string,

@@ -4,6 +4,7 @@ import type { ChannelCallbacks } from "./types.js";
 export interface CommandResult {
   handled: boolean;
   reply?: string;
+  replaceCurrent?: boolean;
 }
 
 export async function handleCommand(
@@ -133,6 +134,75 @@ export async function handleCommand(
 
     callbacks.setWorkdir(chatId, source, newDir);
     return { handled: true, reply: `✅ 已切换工作目录至：\n\`${newDir}\`\n\n接下来的对话将在此目录下进行。` };
+  }
+
+  // 10. 动态设置菜单
+  if (trimmed === "设置" || trimmed === "/settings") {
+    return {
+      handled: true,
+      replaceCurrent: true,
+      reply: [
+        "**请选择要设置的项目：**",
+        "",
+        "[BUTTON: /menu_model | 🧠 模型设置 | primary]",
+        "[BUTTON: /menu_provider | 🔧 供应商设置 | default]",
+        "[BUTTON: /status | 📊 系统状态 | default]"
+      ].join("\n")
+    };
+  }
+
+  // 二级菜单 - 模型设置
+  if (trimmed === "/menu_model") {
+    const models = callbacks.listModels();
+    const modelButtons = models.map(m => {
+      const icon = m.id.includes("flash") ? "⚡" : (m.id.includes("pro") ? "🚀" : "🤖");
+      const name = m.id;
+      return `[BUTTON: /model ${name} | ${icon} ${name} ${m.isCurrent ? "(当前)" : ""} | default]`;
+    }).join(" ");
+
+    return {
+      handled: true,
+      replaceCurrent: true,
+      reply: [
+        "**请选择要设置的项目：**",
+        "",
+        "[BUTTON: /menu_model | 🧠 模型设置 | primary]",
+        "[BUTTON: /menu_provider | 🔧 供应商设置 | default]",
+        "[BUTTON: /status | 📊 系统状态 | default]",
+        "---",
+        "**👇 请选择模型：**",
+        "",
+        modelButtons,
+        "",
+        "[BUTTON: /settings | 🔙 收起菜单 | danger]"
+      ].join("\n")
+    };
+  }
+
+  // 二级菜单 - 供应商设置
+  if (trimmed === "/menu_provider") {
+    const providers = callbacks.listProviders();
+    const providerButtons = providers.map(p => {
+      return `[BUTTON: /provider ${p.type} | 🔧 ${p.type} ${p.isCurrent ? "(当前)" : ""} | default]`;
+    }).join(" ");
+
+    return {
+      handled: true,
+      replaceCurrent: true,
+      reply: [
+        "**请选择要设置的项目：**",
+        "",
+        "[BUTTON: /menu_model | 🧠 模型设置 | default]",
+        "[BUTTON: /menu_provider | 🔧 供应商设置 | primary]",
+        "[BUTTON: /status | 📊 系统状态 | default]",
+        "---",
+        "**👇 请选择供应商：**",
+        "",
+        providerButtons,
+        "",
+        "[BUTTON: /settings | 🔙 收起菜单 | danger]"
+      ].join("\n")
+    };
   }
 
   return { handled: false };

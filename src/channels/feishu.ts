@@ -245,7 +245,12 @@ export class FeishuChannel implements IChannel {
     const cmd = await handleCommand(userText, chatId, "feishu", this.callbacks!);
     if (cmd.handled) {
       if (cmd.reply) {
-        await sendText(client, chatId, cmd.reply, "系统提示");
+        if (cmd.replaceCurrent && event?.context?.open_message_id) {
+          const { updateText } = await import("../lark.js");
+          await updateText(client, event.context.open_message_id, cmd.reply, "系统提示");
+        } else {
+          await sendText(client, chatId, cmd.reply, "系统提示");
+        }
       }
       return {
         toast: {
