@@ -102,7 +102,10 @@ function extractButtons(text: string): { cleanText: string; buttons: ExtractedBu
   const buttons: ExtractedButton[] = [];
   const regex = /\[BUTTON:\s*([^\]]+)\]/gi;
 
-  const cleanText = text.replace(regex, (_, raw) => {
+  const cleanText = text.replace(regex, (fullMatch, raw) => {
+    if (raw.trim() === "..." || raw.trim().startsWith("...")) {
+      return fullMatch;
+    }
     const parts = raw.split("|").map((p: string) => p.trim());
     if (parts.length === 1) {
       buttons.push({
