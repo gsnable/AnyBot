@@ -97,6 +97,7 @@ export class FeishuChannel implements IChannel {
           mentions?: Array<{ id?: { open_id?: string } }>;
         };
       }) => this.handleMessage(event),
+      "card.action.trigger": (event: any) => this.handleCardAction(event),
     });
 
     await wsClient.start({ eventDispatcher: dispatcher });
@@ -207,6 +208,75 @@ export class FeishuChannel implements IChannel {
       void this.processTextMessage(client, config, message);
       return;
     }
+  }
+
+  private async handleCardAction(event: any): Promise<any> {
+    const client = this.larkClient;
+    if (!client) return {};
+
+    logger.info("feishu.card_action.received", {
+      action: event?.action || event?.event?.action,
+      openChatId: event?.context?.open_chat_id || event?.open_chat_id || event?.event?.context?.open_chat_id,
+    });
+
+    const chatId =
+      event?.context?.open_chat_id ||
+      event?.open_chat_id ||
+      event?.chat_id ||
+      event?.event?.context?.open_chat_id;
+
+    const action = event?.action || event?.event?.action;
+    const actionValue = action?.value;
+
+    const userText =
+      typeof actionValue === "string"
+        ? actionValue
+        : (actionValue?.text || actionValue?.command || "");
+
+    if (!chatId || !userText) {
+      return {
+        toast: {
+          type: "warning",
+          content: "未能获取有效操作指令",
+        },
+      };
+    }
+
+    const cmd = await handleCommand(userText, chatId, "feishu", this.callbacks!);
+    if (cmd.handled) {
+      if (cmd.reply) {
+        await sendText(client, chatId, cmd.reply, "系统提示");
+      }
+      return {
+        toast: {
+          type: "success",
+          content: `已执行：${userText}`,
+        },
+      };
+    }
+
+    this.enqueueChatTask(chatId, async () => {
+      try {
+        const reply = await this.callbacks!.generateReply(
+          chatId,
+          userText,
+          undefined,
+          "feishu",
+        );
+        await sendReply(client, chatId, reply, getWorkdir());
+      } catch (error) {
+        logger.error("feishu.card_action.failed", { chatId, error });
+        const { formatProviderError } = await import("../index.js");
+        await sendText(client, chatId, formatProviderError(error), "系统提示");
+      }
+    });
+
+    return {
+      toast: {
+        type: "info",
+        content: `已选择：${userText}`,
+      },
+    };
   }
 
   private async processTextMessage(

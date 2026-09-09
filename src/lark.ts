@@ -19,6 +19,18 @@ type LarkCardElement =
     }
   | {
       tag: "hr";
+    }
+  | {
+      tag: "action";
+      actions: Array<{
+        tag: "button";
+        text: {
+          tag: "plain_text";
+          content: string;
+        };
+        type?: "default" | "primary" | "danger";
+        value?: Record<string, any>;
+      }>;
     };
 
 function splitMarkdownBlocks(text: string): string[] {
@@ -80,31 +92,93 @@ function splitMarkdownBlocks(text: string): string[] {
   return blocks;
 }
 
-function buildCardElements(text: string, isLarge?: boolean): LarkCardElement[] {
-  const blocks = splitMarkdownBlocks(text);
-  if (blocks.length === 0) {
-    return [
-      {
-        tag: "markdown",
-        content: isLarge ? `**${text}**` : text,
-      },
-    ];
-  }
+interface ExtractedButton {
+  value: string;
+  label: string;
+  type?: "default" | "primary" | "danger";
+}
 
-  return blocks.flatMap((block, index) => {
-    const elements: LarkCardElement[] = [
-      {
+function extractButtons(text: string): { cleanText: string; buttons: ExtractedButton[] } {
+  const buttons: ExtractedButton[] = [];
+  const regex = /\[BUTTON:\s*([^\]]+)\]/gi;
+
+  const cleanText = text.replace(regex, (_, raw) => {
+    const parts = raw.split("|").map((p: string) => p.trim());
+    if (parts.length === 1) {
+      buttons.push({
+        value: parts[0],
+        label: parts[0],
+        type: buttons.length === 0 ? "primary" : "default",
+      });
+    } else if (parts.length === 2) {
+      buttons.push({
+        value: parts[0],
+        label: parts[1],
+        type: buttons.length === 0 ? "primary" : "default",
+      });
+    } else if (parts.length >= 3) {
+      const btnType = ["default", "primary", "danger"].includes(parts[2].toLowerCase())
+        ? (parts[2].toLowerCase() as "default" | "primary" | "danger")
+        : "default";
+      buttons.push({
+        value: parts[0],
+        label: parts[1],
+        type: btnType,
+      });
+    }
+    return "";
+  }).trim();
+
+  return { cleanText, buttons };
+}
+
+function buildCardElements(text: string, isLarge?: boolean): LarkCardElement[] {
+  const { cleanText, buttons } = extractButtons(text);
+  const effectiveText = cleanText || (buttons.length > 0 ? "请点击下方选项进行选择：" : text);
+  const blocks = splitMarkdownBlocks(effectiveText);
+
+  const elements: LarkCardElement[] = [];
+
+  if (blocks.length === 0) {
+    if (effectiveText) {
+      elements.push({
+        tag: "markdown",
+        content: isLarge ? `**${effectiveText}**` : effectiveText,
+      });
+    }
+  } else {
+    blocks.forEach((block, index) => {
+      elements.push({
         tag: "markdown",
         content: isLarge ? `**${block}**` : block,
-      },
-    ];
+      });
+      if (index < blocks.length - 1) {
+        elements.push({ tag: "hr" });
+      }
+    });
+  }
 
-    if (index < blocks.length - 1) {
-      elements.push({ tag: "hr" });
+  if (buttons.length > 0) {
+    for (let i = 0; i < buttons.length; i += 5) {
+      const chunk = buttons.slice(i, i + 5);
+      elements.push({
+        tag: "action",
+        actions: chunk.map((b) => ({
+          tag: "button",
+          text: {
+            tag: "plain_text",
+            content: b.label,
+          },
+          type: b.type || "default",
+          value: {
+            text: b.value,
+          },
+        })),
+      });
     }
+  }
 
-    return elements;
-  });
+  return elements;
 }
 
 function toInteractiveCardContent(text: string, title?: string): string {
