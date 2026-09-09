@@ -254,22 +254,19 @@ export class FeishuChannel implements IChannel {
       if (cmd.reply) {
         if (cmd.replaceCurrent && messageId) {
           const { updateText } = await import("../lark.js");
+          const cardTitle = cmd.title || "系统设置";
           // 飞书规范：在回调返回确认后（150ms）执行 patch，防止客户端交互结束时覆盖新卡片
           setTimeout(async () => {
             try {
-              await updateText(client, messageId, cmd.reply!, "系统提示");
+              await updateText(client, messageId, cmd.reply!, cardTitle);
             } catch (err) {
               logger.error("feishu.card_action.update_failed", { messageId, error: err });
             }
           }, 150);
-          return {
-            toast: {
-              type: "info",
-              content: "已展开选项",
-            },
-          };
+          // 遵循用户要求：菜单展开、切换、收起时静默刷新，不弹 Toast 提示
+          return {};
         } else {
-          await sendText(client, chatId, cmd.reply, "系统提示");
+          await sendText(client, chatId, cmd.reply, cmd.title || "系统提示");
         }
       }
       return {
