@@ -320,7 +320,7 @@ export async function updateText(
   text: string,
   title?: string,
 ): Promise<void> {
-  logger.debug("lark.update_text", {
+  logger.info("lark.update_text.start", {
     messageId,
     textChars: text.length,
   });
@@ -329,6 +329,8 @@ export async function updateText(
     data: {
       content: toInteractiveCardContent(text, title),
     },
+  }).then(() => {
+    logger.info("lark.update_text.success", { messageId });
   }).catch(async (error: unknown) => {
     logger.warn("lark.update_text.failed", {
       messageId,

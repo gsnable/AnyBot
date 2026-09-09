@@ -214,16 +214,23 @@ export class FeishuChannel implements IChannel {
     const client = this.larkClient;
     if (!client) return {};
 
-    logger.info("feishu.card_action.received", {
-      action: event?.action || event?.event?.action,
-      openChatId: event?.context?.open_chat_id || event?.open_chat_id || event?.event?.context?.open_chat_id,
-    });
-
     const chatId =
       event?.context?.open_chat_id ||
       event?.open_chat_id ||
       event?.chat_id ||
       event?.event?.context?.open_chat_id;
+
+    const messageId =
+      event?.context?.open_message_id ||
+      event?.open_message_id ||
+      event?.message_id ||
+      event?.event?.context?.open_message_id;
+
+    logger.info("feishu.card_action.received", {
+      action: event?.action || event?.event?.action,
+      openChatId: chatId,
+      openMessageId: messageId,
+    });
 
     const action = event?.action || event?.event?.action;
     const actionValue = action?.value;
@@ -245,12 +252,22 @@ export class FeishuChannel implements IChannel {
     const cmd = await handleCommand(userText, chatId, "feishu", this.callbacks!);
     if (cmd.handled) {
       if (cmd.reply) {
-        if (cmd.replaceCurrent && event?.context?.open_message_id) {
-          const { updateText, toInteractiveCardObject } = await import("../lark.js");
-          // 发送 patch 请求确保远端更新
-          await updateText(client, event.context.open_message_id, cmd.reply, "系统提示");
-          // 同时返回给客户端新的卡片对象，避免客户端清除 loading 状态时发生回滚覆盖
-          return toInteractiveCardObject(cmd.reply, "系统提示");
+        if (cmd.replaceCurrent && messageId) {
+          const { updateText } = await import("../lark.js");
+          // 飞书规范：在回调返回确认后（150ms）执行 patch，防止客户端交互结束时覆盖新卡片
+          setTimeout(async () => {
+            try {
+              await updateText(client, messageId, cmd.reply!, "系统提示");
+            } catch (err) {
+              logger.error("feishu.card_action.update_failed", { messageId, error: err });
+            }
+          }, 150);
+          return {
+            toast: {
+              type: "info",
+              content: "已展开选项",
+            },
+          };
         } else {
           await sendText(client, chatId, cmd.reply, "系统提示");
         }
