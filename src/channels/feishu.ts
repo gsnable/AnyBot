@@ -253,18 +253,17 @@ export class FeishuChannel implements IChannel {
     if (cmd.handled) {
       if (cmd.reply) {
         if (cmd.replaceCurrent && messageId) {
-          const { updateText } = await import("../lark.js");
+          const { updateText, toInteractiveCardObject } = await import("../lark.js");
           const cardTitle = cmd.title || "系统设置";
-          // 飞书规范：在回调返回确认后（150ms）执行 patch，防止客户端交互结束时覆盖新卡片
-          setTimeout(async () => {
-            try {
-              await updateText(client, messageId, cmd.reply!, cardTitle);
-            } catch (err) {
-              logger.error("feishu.card_action.update_failed", { messageId, error: err });
-            }
-          }, 150);
-          // 遵循用户要求：菜单展开、切换、收起时静默刷新，不弹 Toast 提示
-          return {};
+          const cardObj = toInteractiveCardObject(cmd.reply!, cardTitle);
+
+          // 异步 patch 确保持久化，不阻塞回调
+          updateText(client, messageId, cmd.reply!, cardTitle).catch((err) => {
+            logger.warn("feishu.card_action.async_patch_failed", { messageId, error: err });
+          });
+
+          // 核心修复：直接向飞书客户端回传完整的卡片对象，彻底消除 108002 错误并实现一次点击立即原地刷新
+          return cardObj;
         } else {
           await sendText(client, chatId, cmd.reply, cmd.title || "系统提示");
         }
