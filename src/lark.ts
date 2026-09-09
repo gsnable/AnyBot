@@ -136,50 +136,107 @@ function extractButtons(text: string): { cleanText: string; buttons: ExtractedBu
 }
 
 function buildCardElements(text: string, isLarge?: boolean): LarkCardElement[] {
-  const { cleanText, buttons } = extractButtons(text);
-  const effectiveText = cleanText || (buttons.length > 0 ? "请点击下方选项进行选择：" : text);
-  const blocks = splitMarkdownBlocks(effectiveText);
-
+  const btnRegex = /\[BUTTON:\s*([^\]]+)\]/gi;
   const elements: LarkCardElement[] = [];
+  const lines = text.split("\n");
+  let currentTextLines: string[] = [];
+  let currentButtons: ExtractedButton[] = [];
 
-  if (blocks.length === 0) {
-    if (effectiveText) {
-      elements.push({
-        tag: "markdown",
-        content: isLarge ? `**${effectiveText}**` : effectiveText,
-      });
-    }
-  } else {
-    blocks.forEach((block, index) => {
-      elements.push({
-        tag: "markdown",
-        content: isLarge ? `**${block}**` : block,
-      });
-      if (index < blocks.length - 1) {
-        elements.push({ tag: "hr" });
+  function flushText() {
+    if (currentTextLines.length > 0) {
+      const content = currentTextLines.join("\n").trim();
+      if (content) {
+        const blocks = splitMarkdownBlocks(content);
+        if (blocks.length === 0) {
+          elements.push({
+            tag: "markdown",
+            content: isLarge ? `**${content}**` : content,
+          });
+        } else {
+          blocks.forEach((block, index) => {
+            elements.push({
+              tag: "markdown",
+              content: isLarge ? `**${block}**` : block,
+            });
+            if (index < blocks.length - 1) {
+              elements.push({ tag: "hr" });
+            }
+          });
+        }
       }
-    });
-  }
-
-  if (buttons.length > 0) {
-    for (let i = 0; i < buttons.length; i += 5) {
-      const chunk = buttons.slice(i, i + 5);
-      elements.push({
-        tag: "action",
-        actions: chunk.map((b) => ({
-          tag: "button",
-          text: {
-            tag: "plain_text",
-            content: b.label,
-          },
-          type: b.type || "default",
-          value: {
-            text: b.value,
-          },
-        })),
-      });
+      currentTextLines = [];
     }
   }
+
+  function flushButtons() {
+    if (currentButtons.length > 0) {
+      for (let i = 0; i < currentButtons.length; i += 5) {
+        const chunk = currentButtons.slice(i, i + 5);
+        elements.push({
+          tag: "action",
+          actions: chunk.map((b) => ({
+            tag: "button",
+            text: {
+              tag: "plain_text",
+              content: b.label,
+            },
+            type: b.type || "default",
+            value: {
+              text: b.value,
+            },
+          })),
+        });
+      }
+      currentButtons = [];
+    }
+  }
+
+  for (const line of lines) {
+    const lineButtons: ExtractedButton[] = [];
+    const textWithoutButtons = line.replace(btnRegex, (fullMatch, raw) => {
+      if (raw.trim() === "..." || raw.trim().startsWith("...")) {
+        return fullMatch;
+      }
+      const parts = raw.split("|").map((p: string) => p.trim());
+      if (parts.length === 1) {
+        lineButtons.push({
+          value: parts[0],
+          label: parts[0],
+          type: "default",
+        });
+      } else if (parts.length === 2) {
+        lineButtons.push({
+          value: parts[0],
+          label: parts[1],
+          type: "default",
+        });
+      } else if (parts.length >= 3) {
+        const btnType = ["default", "primary", "danger"].includes(parts[2].toLowerCase())
+          ? (parts[2].toLowerCase() as "default" | "primary" | "danger")
+          : "default";
+        lineButtons.push({
+          value: parts[0],
+          label: parts[1],
+          type: btnType,
+        });
+      }
+      return "";
+    }).trim();
+
+    if (lineButtons.length > 0) {
+      if (textWithoutButtons) {
+        currentTextLines.push(textWithoutButtons);
+      }
+      flushText();
+      currentButtons.push(...lineButtons);
+    } else {
+      flushButtons();
+      currentTextLines.push(line);
+    }
+  }
+
+  flushText();
+  flushButtons();
 
   return elements;
 }
