@@ -7,3 +7,4 @@ dist
 .skills/
 .data/
 GEMINI.md
+*.log
