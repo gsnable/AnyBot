@@ -42,6 +42,13 @@ class CappedSet<T> {
   }
 }
 
+interface BufferedMedia {
+  messageId: string;
+  filePath: string;
+  mediaType: "image" | "file";
+  timestamp: number;
+}
+
 export class FeishuChannel implements IChannel {
   readonly type = "feishu";
 
@@ -52,6 +59,28 @@ export class FeishuChannel implements IChannel {
   private handledMessageIds = new CappedSet<string>(MAX_HANDLED_IDS);
   private queueByChat = new Map<string, Promise<void>>();
   private startedAtMs: number = 0;
+  private mediaBuffer = new Map<string, BufferedMedia[]>();
+
+  private addMediaToBuffer(chatId: string, media: BufferedMedia): void {
+    const now = Date.now();
+    const ttlMs = 10 * 60 * 1000;
+    const existing = (this.mediaBuffer.get(chatId) || []).filter(
+      (m) => now - m.timestamp < ttlMs,
+    );
+    existing.push(media);
+    if (existing.length > 5) {
+      existing.splice(0, existing.length - 5);
+    }
+    this.mediaBuffer.set(chatId, existing);
+  }
+
+  private consumeRecentMedia(chatId: string, maxAgeMs = 10 * 60 * 1000): string[] {
+    const now = Date.now();
+    const existing = this.mediaBuffer.get(chatId) || [];
+    const valid = existing.filter((m) => now - m.timestamp < maxAgeMs);
+    this.mediaBuffer.delete(chatId);
+    return valid.map((m) => m.filePath);
+  }
 
   async start(callbacks: ChannelCallbacks): Promise<void> {
     const config = readChannelConfig<FeishuChannelConfig>("feishu");
@@ -190,18 +219,19 @@ export class FeishuChannel implements IChannel {
       logger.info("feishu.owner_auto_saved", { chatId: message.chat_id });
     }
 
-    if (isGroup) {
-      if (!this.shouldReplyInGroup(message.mentions)) return;
-    }
-
     if (message.message_type === "image") {
-      void this.processImageMessage(client, config, message);
+      void this.processImageMessage(client, config, message, isGroup);
       return;
     }
 
     if (message.message_type === "file") {
-      void this.processFileMessage(client, config, message);
+      void this.processFileMessage(client, config, message, isGroup);
       return;
+    }
+
+    // 文本消息在群聊中按配置执行 @ 门禁拦截
+    if (isGroup) {
+      if (!this.shouldReplyInGroup(message.mentions)) return;
     }
 
     if (message.message_type === "text" || message.message_type === "post") {
@@ -328,12 +358,25 @@ export class FeishuChannel implements IChannel {
       });
     }
 
+    // 检查最近是否有未消费的暂存图片/文件，自动关联上下文
+    const recentMediaPaths = this.consumeRecentMedia(message.chat_id);
+    const imagePaths = recentMediaPaths.length > 0 ? recentMediaPaths : undefined;
+
+    if (imagePaths && imagePaths.length > 0) {
+      logger.info("feishu.text.injected_buffered_media", {
+        chatId: message.chat_id,
+        messageId: message.message_id,
+        mediaCount: imagePaths.length,
+        paths: imagePaths,
+      });
+    }
+
     this.enqueueChatTask(message.chat_id, async () => {
       try {
         const reply = await this.callbacks!.generateReply(
           message.chat_id,
           userText,
-          undefined,
+          imagePaths,
           "feishu",
         );
         await sendReply(client, message.chat_id, reply, getWorkdir());
@@ -357,7 +400,9 @@ export class FeishuChannel implements IChannel {
       chat_id: string;
       message_type: string;
       content: string;
+      mentions?: Array<{ id?: { open_id?: string } }>;
     },
+    isGroup: boolean,
   ): Promise<void> {
     try {
       await sendAckReaction(client, message.message_id, config.ackReaction);
@@ -369,17 +414,50 @@ export class FeishuChannel implements IChannel {
     }
 
     let imagePath: string | null = null;
+    try {
+      const mediaDir = path.join(getDataDir(), "media", message.chat_id);
+      imagePath = await downloadImageFromMessage(client, message, mediaDir);
+      this.addMediaToBuffer(message.chat_id, {
+        messageId: message.message_id,
+        filePath: imagePath,
+        mediaType: "image",
+        timestamp: Date.now(),
+      });
+      logger.info("feishu.image.buffered", {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        imagePath,
+      });
+    } catch (error) {
+      logger.error("feishu.image.download_failed", {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        error,
+      });
+      return;
+    }
+
+    const shouldReply = !isGroup || this.shouldReplyInGroup(message.mentions);
+    if (!shouldReply) {
+      logger.info("feishu.image.ingested_silently", {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        reason: "group_chat_no_mention_buffered",
+      });
+      return;
+    }
+
+    const bufferedPaths = this.consumeRecentMedia(message.chat_id);
+    const pathsToProcess = bufferedPaths.length > 0 ? bufferedPaths : [imagePath];
 
     this.enqueueChatTask(message.chat_id, async () => {
       try {
-        const mediaDir = path.join(getDataDir(), "media", message.chat_id);
-        imagePath = await downloadImageFromMessage(client, message, mediaDir);
         const userText =
           "用户发来了一张图片。请先根据图片内容直接回答；如果缺少上下文，就先简要描述图片里有什么，并询问对方希望你进一步做什么。";
         const reply = await this.callbacks!.generateReply(
           message.chat_id,
           userText,
-          [imagePath],
+          pathsToProcess,
           "feishu",
         );
         await sendReply(client, message.chat_id, reply, getWorkdir());
@@ -403,7 +481,9 @@ export class FeishuChannel implements IChannel {
       chat_id: string;
       message_type: string;
       content: string;
+      mentions?: Array<{ id?: { open_id?: string } }>;
     },
+    isGroup: boolean,
   ): Promise<void> {
     try {
       await sendAckReaction(client, message.message_id, config.ackReaction);
@@ -415,19 +495,52 @@ export class FeishuChannel implements IChannel {
     }
 
     let filePath: string | null = null;
+    try {
+      const mediaDir = path.join(getDataDir(), "media", message.chat_id);
+      filePath = await downloadFileFromMessage(client, message, mediaDir);
+      this.addMediaToBuffer(message.chat_id, {
+        messageId: message.message_id,
+        filePath,
+        mediaType: "file",
+        timestamp: Date.now(),
+      });
+      logger.info("feishu.file.buffered", {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        filePath,
+      });
+    } catch (error) {
+      logger.error("feishu.file.download_failed", {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        error,
+      });
+      return;
+    }
+
+    const shouldReply = !isGroup || this.shouldReplyInGroup(message.mentions);
+    if (!shouldReply) {
+      logger.info("feishu.file.ingested_silently", {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        reason: "group_chat_no_mention_buffered",
+      });
+      return;
+    }
+
+    const bufferedPaths = this.consumeRecentMedia(message.chat_id);
+    const pathsToProcess = bufferedPaths.length > 0 ? bufferedPaths : [filePath];
 
     this.enqueueChatTask(message.chat_id, async () => {
       try {
-        const mediaDir = path.join(getDataDir(), "media", message.chat_id);
-        filePath = await downloadFileFromMessage(client, message, mediaDir);
-        const fileName = path.basename(filePath);
+        const fileName = path.basename(filePath!);
         const userText = `用户发来了一个文件：${fileName}。请读取并分析该文件的内容，并回答用户的问题。`;
         
         // 我们将文件路径放入 imagePaths 数组中，因为 gemini-cli 会统一处理这些路径为 @ 语法
         const reply = await this.callbacks!.generateReply(
           message.chat_id,
           userText,
-          [filePath],
+          pathsToProcess,
           "feishu",
         );
         await sendReply(client, message.chat_id, reply, getWorkdir());
