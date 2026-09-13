@@ -306,6 +306,26 @@ export class FeishuChannel implements IChannel {
       };
     }
 
+    if (messageId) {
+      try {
+        await sendAckReaction(client, messageId, this.config?.ackReaction || "OK");
+      } catch (error) {
+        logger.warn("feishu.card_action.ack_failed", { messageId, error });
+      }
+    }
+
+    // 立即向聊天窗口发送即时确认消息，消除等待真空
+    try {
+      await sendText(
+        client,
+        chatId,
+        `👌 收到指令【${userText}】，富贵正在加速处理，请稍候...`,
+        "系统提示",
+      );
+    } catch (error) {
+      logger.warn("feishu.card_action.quick_ack_failed", { chatId, error });
+    }
+
     this.enqueueChatTask(chatId, async () => {
       try {
         const reply = await this.callbacks!.generateReply(
@@ -324,8 +344,8 @@ export class FeishuChannel implements IChannel {
 
     return {
       toast: {
-        type: "info",
-        content: `已选择：${userText}`,
+        type: "success",
+        content: `✅ 收到【${userText}】，富贵正在处理...`,
       },
     };
   }
