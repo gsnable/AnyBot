@@ -292,8 +292,14 @@ export class FeishuChannel implements IChannel {
             logger.warn("feishu.card_action.async_patch_failed", { messageId, error: err });
           });
 
-          // 核心修复：直接向飞书客户端回传完整的卡片对象，彻底消除 108002 错误并实现一次点击立即原地刷新
-          return cardObj;
+          // 核心修复：按飞书开放平台规范，回传包含 card 字段的标准包装对象与提示
+          return {
+            toast: {
+              type: "success",
+              content: `已切换至：${cardTitle}`,
+            },
+            card: cardObj,
+          };
         } else {
           await sendText(client, chatId, cmd.reply, cmd.title || "系统提示");
         }

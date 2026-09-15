@@ -66,7 +66,7 @@ export async function handleCommand(
     }
     const lines = ["📂 **最近历史会话**（点击下方按钮直接切换）：", ""];
     const buttons: string[] = [];
-    sessions.slice(0, 5).forEach((s, i) => {
+    sessions.slice(0, 10).forEach((s, i) => {
       const timeStr = new Date(s.updatedAt).toLocaleString("zh-CN", {
         month: "numeric",
         day: "numeric",
@@ -307,13 +307,14 @@ export async function handleCommand(
     ];
     const sessionButtons: string[] = [];
     if (sessions.length > 0) {
-      sessions.slice(0, 3).forEach((s, i) => {
+      sessions.slice(0, 6).forEach((s, i) => {
         const shortTitle =
-          s.title.length > 14 ? s.title.slice(0, 14) + "..." : s.title;
+          s.title.length > 12 ? s.title.slice(0, 12) + "..." : s.title;
         sessionButtons.push(
           `[BUTTON: /resume ${i + 1} | 🎬 ${i + 1}. ${shortTitle} | default]`,
         );
       });
+      sessionButtons.push(`[BUTTON: /chats | 📂 全部历史 | default]`);
       lines.push(sessionButtons.join(" "));
     } else {
       lines.push("（暂无历史会话记录）");

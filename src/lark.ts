@@ -246,6 +246,7 @@ export function toInteractiveCardObject(text: string, title?: string): any {
     config: {
       wide_screen_mode: true,
       enable_forward: true,
+      update_multi: true,
     },
     elements: buildCardElements(text, !title),
   };
