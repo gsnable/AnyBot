@@ -1,24 +1,65 @@
-import { sendFile, sendText, createLarkClients } from "./src/lark.js";
+import { createLarkClients } from "./src/lark.js";
 import fs from "fs";
 import path from "path";
+import { createReadStream } from "node:fs";
+
+async function sendFileToTarget(client: any, receiveId: string, receiveIdType: "chat_id" | "open_id", filePath: string) {
+  const upload = await client.im.file.create({
+    data: {
+      file_type: "pdf",
+      file_name: path.basename(filePath),
+      file: createReadStream(filePath),
+    },
+  });
+
+  const fileKey = upload?.file_key;
+  if (!fileKey) {
+    throw new Error(`上传文件失败：${filePath}`);
+  }
+
+  await client.im.message.create({
+    params: { receive_id_type: receiveIdType },
+    data: {
+      receive_id: receiveId,
+      msg_type: "file",
+      content: JSON.stringify({ file_key: fileKey }),
+    },
+  });
+  console.log(`成功发送文件至 ${receiveIdType}: ${receiveId}`);
+}
 
 async function main() {
   const config = JSON.parse(fs.readFileSync(".data/channels.json", "utf8"));
   const { appId, appSecret, ownerChatId } = config.feishu;
-  const targetChatId = "oc_6e3f8224dbf81d37ac584b015b5ee5e2";
+  const ownerOpenId = "ou_b1b2dd58c6446dd804ea1780ccb7ffa1";
 
   const { client } = createLarkClients(appId, appSecret);
   const pdfPath = "/root/AnyBot-Dev/第四课 看拼音写词语.pdf";
 
-  console.log(`准备将全新矢量的 A4 PDF [${pdfPath}] 发送到飞书...`);
+  console.log(`准备将全量 25 词紧凑版 A4 PDF [${pdfPath}] 发送到飞书...`);
   
-  await sendText(client, targetChatId, "老山爹，富贵已全面改用 ReportLab 矢量引擎重构了字帖生成器，排除了无头浏览器渲染不全和边距截断的问题。这是为您重新生成的标准 A4《第四课 看拼音写词语.pdf》，包含全部 20 个词语，排版精致美观，请您查收！");
-  await sendFile(client, targetChatId, pdfPath);
-  
-  console.log("PDF 发送成功！");
+  if (ownerOpenId) {
+    try {
+      await sendFileToTarget(client, ownerOpenId, "open_id", pdfPath);
+    } catch (e) {
+      console.error("发送 open_id 失败:", e);
+    }
+  }
+
+  if (ownerChatId) {
+    try {
+      await sendFileToTarget(client, ownerChatId, "chat_id", pdfPath);
+    } catch (e) {
+      console.error("发送 chat_id 失败:", e);
+    }
+  }
 }
 
-main().catch(err => {
-  console.error("发送失败:", err);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error("全流程发送失败:", err);
+    process.exit(1);
+  });
