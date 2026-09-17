@@ -5,25 +5,28 @@
 ---
 
 ## 待办列表 (Pending Tasks)
+*(当前暂无挂起的待办事项)*
+
+---
+
+## 历史归档 (Completed & Cancelled)
 
 ### [TODO-003] 修复系统 glibc NSS 共享库缺失及喷嚏网定时任务解析异常
 - **任务编号**：`TODO-003`
 - **登记时间**：2026-09-17 22:15
+- **完成时间**：2026-09-17 22:12
 - **优先级**：高 (P1)
-- **当前状态**：⏳ 等待审批 (WAITING_APPROVAL)
+- **最终状态**：✅ 已完成交付 (COMPLETED)
+- **审批记录**：老山爹飞书点击【同意】批准执行
 - **问题背景**：
   1. 喷嚏网定时监控脚本（`/root/.gemini/skills/penti-checker/scripts/check_penti.py`）自 2026-09-15 18:20 起在 Crontab 中持续报错：`<urlopen error [Errno 16] Device or resource busy>`，导致昨日与今日未正常定时推送；
   2. 根因在于 09-15 18:17 安装 chromium 依赖中断时，意外导致系统 `/usr/lib/x86_64-linux-gnu/` 下的 `libnss_dns.so.2`、`libnss_files.so.2` 等 4 个 glibc NSS 动态库丢失（`dpkg -V libc6` 证实缺失），致使所有非 proxychains 进程调用 `socket.getaddrinfo()` 均报错；
   3. 脚本缺少超时设置（`timeout`），历史上曾导致 2 个残留卡死的孤儿进程。
 - **实施方案**：
-  1. **还原 NSS 共享库**：从本地官方 `libc6_2.31-13+deb11u11_amd64.deb` 提取缺失的 `libnss_dns.so.2`、`libnss_files.so.2`、`libnss_compat.so.2`、`libnss_hesiod.so.2` 还原至 `/usr/lib/x86_64-linux-gnu/`，执行 `ldconfig` 并验证 `dpkg -V libc6` 与原生 DNS 解析；
-  2. **加固抓取脚本**：为 `check_penti.py` 中 `urllib.request.urlopen` 增加 `timeout=15` 超时防挂死，并通过 `static-validator` 校验；
-  3. **清理僵尸进程并补推**：kill 掉历史孤儿进程（PID 968302, 3054576），并立即执行一次推送以补发今日图卦《【喷嚏图卦20260917】你是做不了杀手的》。
+  1. **还原 NSS 共享库**：从本地官方 `libc6_2.31-13+deb11u11_amd64.deb` 提取缺失的 `libnss_dns.so.2`、`libnss_files.so.2`、`libnss_compat.so.2`、`libnss_hesiod.so.2` 还原至 `/usr/lib/x86_64-linux-gnu/`，执行 `ldconfig`，通过 `dpkg -V libc6` 与原生环境 DNS 解析双向实测验证；
+  2. **加固抓取脚本**：为 `check_penti.py` 中全部 `urllib.request.urlopen` 增加 `timeout=15` 防卡死超时参数，并通过 `static-validator` 深度校验；
+  3. **清理僵尸进程并补推**：精准 kill 掉 2 个历史孤儿进程（PID 968302, 3054576），并成功执行补推今日图卦《【喷嚏图卦20260917】你是做不了杀手的》（Message ID: `om_x100b658b1e2684a4b0360e95b4242f7`），更新状态位为 `20260917`。
 - **影响文件**：`/usr/lib/x86_64-linux-gnu/libnss*`、`/root/.gemini/skills/penti-checker/scripts/check_penti.py`
-
----
-
-## 历史归档 (Completed & Cancelled)
 
 ### [TODO-002] 修复交互卡片二级菜单返回失效缺陷与会话历史展示扩容
 - **任务编号**：`TODO-002`
