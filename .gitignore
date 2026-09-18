@@ -8,3 +8,11 @@ dist
 .data/
 GEMINI.md
 *.log
+*.tmp
+*.pdf
+_temp_*
+test_*
+page_*
+temp
+scripts/dev/
+词语复习.*

@@ -1,11 +1,10 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { getDataDir } from "../shared.js";
 
 import type { ChannelsConfig, FeishuChannelConfig, QQBotChannelConfig, TelegramChannelConfig } from "./types.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.resolve(__dirname, "../../.data/channels.json");
+const CONFIG_PATH = path.join(getDataDir(), "channels.json");
 
 const DEFAULT_CONFIG: ChannelsConfig = {
   feishu: {
@@ -55,7 +54,9 @@ export function readChannelConfig<T extends ChannelsConfig[string]>(
 
 export function writeChannelsConfig(config: ChannelsConfig): void {
   ensureConfig();
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+  const tmpPath = `${CONFIG_PATH}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
+  writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
+  renameSync(tmpPath, CONFIG_PATH);
 }
 
 export function updateChannelConfig(

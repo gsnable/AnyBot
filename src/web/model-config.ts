@@ -1,15 +1,14 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   getProvider,
   getRegisteredProviderTypes,
   switchProvider,
   createProvider,
 } from "../providers/index.js";
+import { getDataDir } from "../shared.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.resolve(__dirname, "../../.data/model-config.json");
+const CONFIG_PATH = path.join(getDataDir(), "model-config.json");
 
 export interface ModelEntry {
   id: string;
@@ -35,9 +34,18 @@ function buildDefaultConfig(): ModelConfig {
   };
 }
 
+let memoryCachedConfig: ModelConfig | null = null;
+
+function writeModelConfigFile(config: ModelConfig): void {
+  const tmpPath = `${CONFIG_PATH}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
+  writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
+  renameSync(tmpPath, CONFIG_PATH);
+  memoryCachedConfig = config;
+}
+
 function ensureConfig(): void {
   if (!existsSync(CONFIG_PATH)) {
-    writeFileSync(CONFIG_PATH, JSON.stringify(buildDefaultConfig(), null, 2), "utf-8");
+    writeModelConfigFile(buildDefaultConfig());
   }
 }
 
@@ -61,9 +69,10 @@ export function readModelConfig(): ModelConfig {
     config.provider = provider.type;
     config.models = provider.listModels();
     config.currentModel = config.lastSelected[provider.type] || config.models[0]?.id || "";
-    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+    writeModelConfigFile(config);
   }
 
+  memoryCachedConfig = config;
   return config;
 }
 
@@ -83,7 +92,7 @@ export function setCurrentModel(modelId: string): ModelConfig {
   }
   config.currentModel = modelId;
   config.lastSelected[config.provider] = modelId;
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+  writeModelConfigFile(config);
   return config;
 }
 
@@ -104,7 +113,7 @@ export function setCurrentProvider(
   config.models = newProvider.listModels();
   config.currentModel = config.lastSelected[providerType] || config.models[0]?.id || "";
 
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+  writeModelConfigFile(config);
   return config;
 }
 
