@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import { getDataDir } from "../shared.js";
 
 export type ChatSession = {
   id: string;
@@ -23,7 +24,7 @@ export type SessionSummary = {
   updatedAt: number;
 };
 
-const dataDir = process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.join(process.cwd(), ".data");
+const dataDir = getDataDir();
 fs.mkdirSync(dataDir, { recursive: true });
 
 const dbPath = path.join(dataDir, "chat.db");
@@ -118,6 +119,10 @@ const stmts = {
     UPDATE sessions SET chat_id = NULL WHERE source = ? AND chat_id = ?
   `),
 
+  resetSessionId: db.prepare(`
+    UPDATE sessions SET session_id = NULL, updated_at = ? WHERE id = ?
+  `),
+
   attachChatId: db.prepare(`
     UPDATE sessions SET chat_id = ? WHERE id = ?
   `),
@@ -125,6 +130,12 @@ const stmts = {
   listUserSessions: db.prepare(`
     SELECT id, title, updated_at AS updatedAt FROM sessions 
     WHERE source = ? 
+    ORDER BY updated_at DESC LIMIT 10
+  `),
+
+  listUserSessionsByChat: db.prepare(`
+    SELECT id, title, updated_at AS updatedAt FROM sessions 
+    WHERE source = ? AND chat_id = ?
     ORDER BY updated_at DESC LIMIT 10
   `),
 
@@ -224,6 +235,10 @@ export function addMessage(sessionId: string, role: "user" | "assistant", conten
   stmts.insertMessage.run(sessionId, role, content, metadata || null);
 }
 
+export function resetSessionId(id: string): void {
+  stmts.resetSessionId.run(Date.now(), id);
+}
+
 export function detachChatId(source: string, chatId: string): void {
   stmts.detachChatId.run(source, chatId);
 }
@@ -232,7 +247,10 @@ export function attachChatId(chatId: string, sessionId: string): void {
   stmts.attachChatId.run(chatId, sessionId);
 }
 
-export function listUserSessions(source: string): any[] {
+export function listUserSessions(source: string, chatId?: string): any[] {
+  if (chatId) {
+    return stmts.listUserSessionsByChat.all(source, chatId);
+  }
   return stmts.listUserSessions.all(source);
 }
 

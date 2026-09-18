@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import path from "node:path";
 import type {
   IProvider,
@@ -8,6 +8,7 @@ import type {
   ProviderCapabilities,
 } from "./types.js";
 import {
+  ProviderTimeoutError,
   ProviderProcessError,
   ProviderEmptyOutputError,
   ProviderParseError,
@@ -71,13 +72,12 @@ export class ClaudeCliProvider implements IProvider {
       sessionId,
       chatId,
       imagePaths = [],
+      timeoutMs = DEFAULT_TIMEOUT_MS,
     } = opts;
     const startedAt = Date.now();
     const effectiveSessionId = sessionId || uuidv4();
 
-    // 强制锁定工作目录
-    const projectRoot = process.cwd();
-    const effectiveWorkdir = projectRoot;
+    const effectiveWorkdir = workdir || process.cwd();
 
     // 终极提示词优化：最朴素的中文指令对当前环境最有效
     let finalPrompt = prompt;
@@ -116,17 +116,51 @@ export class ClaudeCliProvider implements IProvider {
 
       let stdout = "";
       let stderr = "";
+      let killed = false;
+
+      const killProcessGroup = (signal: NodeJS.Signals) => {
+        if (!child.pid) return;
+        if (process.platform === "win32") {
+          try {
+            execSync(`taskkill /T /F /PID ${child.pid}`, { stdio: "ignore" });
+          } catch {
+            child.kill(signal);
+          }
+        } else {
+          try {
+            process.kill(-child.pid, signal);
+          } catch {
+            child.kill(signal);
+          }
+        }
+      };
+
+      const timer = setTimeout(() => {
+        killed = true;
+        killProcessGroup("SIGTERM");
+        setTimeout(() => {
+          if (!child.killed) killProcessGroup("SIGKILL");
+        }, 3000);
+      }, timeoutMs);
+
       child.stdout.on("data", (chunk) => stdout += chunk.toString("utf8"));
       child.stderr.on("data", (chunk) => stderr += chunk.toString("utf8"));
       child.stdin.end();
 
       child.on("error", (error) => {
+        clearTimeout(timer);
         if (chatId) this.activeProcesses.delete(chatId);
         reject(error);
       });
 
       child.on("close", (code) => {
+        clearTimeout(timer);
         if (chatId) this.activeProcesses.delete(chatId);
+
+        if (killed) {
+          reject(new ProviderTimeoutError(timeoutMs));
+          return;
+        }
 
         if (code !== 0 && stderr.includes("No conversation found")) {
           const retryArgs = args.filter(a => a !== "--resume" && a !== sessionId);

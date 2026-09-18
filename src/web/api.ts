@@ -517,7 +517,8 @@ export function chatRouter(): Router {
       if (trimmedContent === "/reset" || trimmedContent === "/new") {
         const provider = getProvider();
         if (provider.stop) await provider.stop(id);
-        db.detachChatId("web", id); // 模拟重置
+        db.resetSessionId(id);
+        session.sessionId = null;
         res.json({ role: "assistant", content: "会话已重置，之前的进程已停止，您可以开始新对话了。", title: session.title });
         return;
       }
@@ -555,7 +556,9 @@ export function chatRouter(): Router {
     // 在搬迁完成后，使用持久化路径构建 metadata 并存入数据库
     const attachmentsForDb = persistentImagePaths.map(p => ({ name: path.basename(p), path: p }));
     const metadata = attachmentsForDb.length > 0 ? JSON.stringify({ attachments: attachmentsForDb }) : null;
-    db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
+    const userMsgContent = content?.trim() || "[附件]";
+    db.addMessage(id, "user", userMsgContent, metadata);
+    session.messages.push({ role: "user", content: userMsgContent, metadata });
 
     try {
       const provider = getProvider();

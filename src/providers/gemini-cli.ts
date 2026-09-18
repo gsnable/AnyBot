@@ -35,7 +35,7 @@ function resolveAgyModel(bin: string, userModel: string): string | undefined {
   const now = Date.now();
   if (now > cachedModelsExpiry) {
     try {
-      const out = execSync(`${bin} models`, { encoding: "utf8", stdio: "pipe" });
+      const out = execSync(`${bin} models`, { encoding: "utf8", stdio: "pipe", timeout: 10_000 });
       const lines = out.split("\n").map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith("Fetching") && !l.startsWith("⠋") && !l.startsWith("⠙"));
       const newCache: { [key: string]: string } = {};
       for (const line of lines) {
@@ -232,6 +232,32 @@ export class GeminiCliProvider implements IProvider {
 
       let stdout = "";
       let stderr = "";
+      let killed = false;
+
+      const killProcessGroup = (signal: NodeJS.Signals) => {
+        if (!child.pid) return;
+        if (process.platform === "win32") {
+          try {
+            execSync(`taskkill /T /F /PID ${child.pid}`, { stdio: "ignore" });
+          } catch {
+            child.kill(signal);
+          }
+        } else {
+          try {
+            process.kill(-child.pid, signal);
+          } catch {
+            child.kill(signal);
+          }
+        }
+      };
+
+      const timer = setTimeout(() => {
+        killed = true;
+        killProcessGroup("SIGTERM");
+        setTimeout(() => {
+          if (!child.killed) killProcessGroup("SIGKILL");
+        }, 3000);
+      }, timeoutMs);
 
       child.stdout.on("data", (chunk: Buffer) => {
         stdout += chunk.toString("utf8");
@@ -244,6 +270,7 @@ export class GeminiCliProvider implements IProvider {
       child.stdin.end();
 
       child.on("error", (error) => {
+        clearTimeout(timer);
         if (chatId) this.activeProcesses.delete(chatId);
         logger.error("provider.exec.spawn_error", {
           provider: this.type,
@@ -255,7 +282,20 @@ export class GeminiCliProvider implements IProvider {
       });
 
       child.on("close", (code) => {
+        clearTimeout(timer);
         if (chatId) this.activeProcesses.delete(chatId);
+
+        if (killed) {
+          logger.warn("provider.exec.timeout", {
+            provider: this.type,
+            workdir,
+            durationMs: Date.now() - startedAt,
+            stdoutChars: stdout.length,
+            stderrChars: stderr.length,
+          });
+          reject(new ProviderTimeoutError(timeoutMs));
+          return;
+        }
 
         if (isAgy) {
           if (code !== 0) {

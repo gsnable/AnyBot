@@ -1,4 +1,5 @@
 import { existsSync, statSync } from "node:fs";
+import os from "node:os";
 import type { ChannelCallbacks } from "./types.js";
 
 export interface CommandResult {
@@ -224,18 +225,20 @@ export async function handleCommand(
   // 9. 工作目录管理
   if (trimmed === "/cwd") {
     const current = callbacks.getWorkdir(chatId, source);
-    return {
-      handled: true,
-      title: "📍 工作目录",
-      reply: [
-        `📍 **当前工作目录**：\n\`${current}\``,
-        "",
-        "快捷切换预设路径：",
-        "[BUTTON: /cwd /root/AnyBot-Dev | 📁 AnyBot-Dev | default] [BUTTON: /cwd /root | 📁 /root | default]",
-        "",
-        "[BUTTON: /menu_sys | 🔙 返回系统环境 | default]",
-      ].join("\n"),
-    };
+      const appDir = process.env.APP_DIR || process.cwd();
+      const homeDir = os.homedir();
+      return {
+        handled: true,
+        title: "📍 工作目录",
+        reply: [
+          `📍 **当前工作目录**：\n\`${current}\``,
+          "",
+          "快捷切换预设路径：",
+          `[BUTTON: /cwd ${appDir} | 📁 AnyBot 工程 | default] [BUTTON: /cwd ${homeDir} | 📁 用户家目录 | default]`,
+          "",
+          "[BUTTON: /menu_sys | 🔙 返回系统环境 | default]",
+        ].join("\n"),
+      };
   }
 
   if (trimmed.startsWith("/cwd ")) {
@@ -270,6 +273,42 @@ export async function handleCommand(
         "",
         "[BUTTON: /menu_sys | 🔙 返回系统环境 | default]",
         "[BUTTON: /settings | ⚙️ 控制中心 | default]",
+      ].join("\n"),
+    };
+  }
+
+  // 系统运行状态
+  if (trimmed === "/status") {
+    const currentWorkdir = callbacks.getWorkdir(chatId, source);
+    const currentModel = callbacks.listModels().find((m) => m.isCurrent)?.name || "默认模型";
+    const currentProviderObj = callbacks.listProviders().find((p) => p.isCurrent);
+    const providerStr = currentProviderObj ? `${currentProviderObj.displayName} (${currentProviderObj.type})` : "默认供应商";
+    const uptimeSec = Math.floor(process.uptime());
+    const hours = Math.floor(uptimeSec / 3600);
+    const minutes = Math.floor((uptimeSec % 3600) / 60);
+    const seconds = uptimeSec % 60;
+    const uptimeStr = `${hours}h ${minutes}m ${seconds}s`;
+
+    const mem = process.memoryUsage();
+    const rssMb = (mem.rss / 1024 / 1024).toFixed(1);
+    const heapMb = (mem.heapUsed / 1024 / 1024).toFixed(1);
+    const freeMemGb = (os.freemem() / 1024 / 1024 / 1024).toFixed(1);
+    const totalMemGb = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1);
+
+    return {
+      handled: true,
+      title: "📊 AnyBot 运行状态",
+      reply: [
+        "📊 **AnyBot 系统运行指标**",
+        "",
+        `⏱️ **运行时长**：\`${uptimeStr}\``,
+        `🤖 **当前供应商**：\`${providerStr}\``,
+        `🧠 **当前模型**：\`${currentModel}\``,
+        `📁 **工作目录**：\`${currentWorkdir}\``,
+        `💾 **进程内存**：\`RSS ${rssMb} MB / Heap ${heapMb} MB\``,
+        `🖥️ **系统内存**：\`剩余 ${freeMemGb} GB / 总计 ${totalMemGb} GB\``,
+        "",
+        "[BUTTON: /settings | ⚙️ 控制中心 | primary] [BUTTON: /chats | 📂 历史会话 | default]",
       ].join("\n"),
     };
   }
@@ -425,6 +464,8 @@ export async function handleCommand(
   // 三级菜单 - 工作目录切换
   if (trimmed === "/menu_cwd") {
     const currentDir = callbacks.getWorkdir(chatId, source);
+    const appDir = process.env.APP_DIR || process.cwd();
+    const homeDir = os.homedir();
     return {
       handled: true,
       replaceCurrent: true,
@@ -433,8 +474,8 @@ export async function handleCommand(
         `当前路径：\`${currentDir}\``,
         "",
         "👇 **预设工程目录快捷切换**：",
-        "[BUTTON: /cwd /root/AnyBot-Dev | 📁 AnyBot-Dev (主工程) | default]",
-        "[BUTTON: /cwd /root | 📁 /root (根目录) | default]",
+        `[BUTTON: /cwd ${appDir} | 📁 AnyBot 工程 | default]`,
+        `[BUTTON: /cwd ${homeDir} | 📁 用户家目录 | default]`,
         "",
         "💡 *如需切换至自定义目录，可直接发送：`/cwd <绝对路径>`*",
         "",

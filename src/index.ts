@@ -21,6 +21,7 @@ process.on("uncaughtException", (error) => {
 import {
   initProvider,
   getProvider,
+  getDefaultProviderConfig,
   ProviderTimeoutError,
   ProviderProcessError,
   ProviderEmptyOutputError,
@@ -53,37 +54,7 @@ import {
   getSandbox,
 } from "./shared.js";
 
-function getProviderConfig(type: string): Record<string, unknown> {
-  switch (type) {
-    case "codex":
-      return { bin: process.env.CODEX_BIN };
-    case "gemini-cli":
-      return {
-        bin: process.env.GEMINI_CLI_BIN,
-        approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || "yolo",
-      };
-    case "claude-code":
-      return {
-        bin: process.env.CLAUDE_CLI_BIN,
-        approvalMode: process.env.CLAUDE_CLI_APPROVAL_MODE || "yolo",
-      };
-    case "cursor-cli":
-      return {
-        bin: process.env.CURSOR_CLI_BIN,
-        workspace: process.env.CURSOR_CLI_WORKSPACE,
-        apiKey: process.env.CURSOR_API_KEY,
-      };
-    case "qoder-cli":
-      return {
-        bin: process.env.QODER_CLI_BIN,
-        maxTurns: process.env.QODER_CLI_MAX_TURNS
-          ? parseInt(process.env.QODER_CLI_MAX_TURNS, 10)
-          : undefined,
-      };
-    default:
-      return {};
-  }
-}
+const getProviderConfig = getDefaultProviderConfig;
 
 const shouldLogContent = includeContentInLogs();
 const shouldLogPrompt = includePromptInLogs();
@@ -186,6 +157,7 @@ async function generateReply(
   imagePaths: string[] = [],
   source: string = "unknown",
   callbacks?: ChannelCallbacks,
+  isRetry: boolean = false,
 ): Promise<string> {
   try {
     const dbSession = getOrCreateChannelSession(source, chatId);
@@ -226,7 +198,12 @@ async function generateReply(
 
     const attachments = persistentImagePaths.map(p => ({ name: path.basename(p), path: p }));
     const metadata = attachments.length > 0 ? JSON.stringify({ attachments }) : null;
-    db.addMessage(dbSession.id, "user", userText, metadata);
+    
+    // 重试时不重复向数据库追加同名用户提问
+    if (!isRetry) {
+      db.addMessage(dbSession.id, "user", userText, metadata);
+      dbSession.messages.push({ role: "user", content: userText, metadata });
+    }
 
     if (dbSession.messages.length <= 1) {
       dbSession.title = generateTitle(userText);
@@ -400,7 +377,7 @@ const channelCallbacks: ChannelCallbacks = {
         logger.warn("retry.metadata_parse_failed", { chatId, error: e });
       }
     }
-    return await generateReply(chatId, lastUserMsg.content, imagePaths, source, channelCallbacks);
+    return await generateReply(chatId, lastUserMsg.content, imagePaths, source, channelCallbacks, true);
   },
   sendProgress: async (chatId, message) => {},
   resetSession: resetChatSession,
@@ -411,7 +388,7 @@ const channelCallbacks: ChannelCallbacks = {
       await p.stop(chatId);
     }
   },
-  listUserSessions: async (chatId, source) => db.listUserSessions(source),
+  listUserSessions: async (chatId, source) => db.listUserSessions(source, chatId),
   getSessionMessages: async (dbSessionId) => {
     const session = db.getSession(dbSessionId);
     return session ? session.messages : [];
