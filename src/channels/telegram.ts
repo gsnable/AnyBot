@@ -243,7 +243,7 @@ export class TelegramChannel implements IChannel {
 
     let cmd;
     try {
-      cmd = await handleCommand(userText, chatId, "telegram", this.callbacks!);
+      cmd = await handleCommand(userText, chatId, "telegram", this.callbacks!, isGroup);
     } catch (err) {
       logger.error("telegram.command_failed", { chatId, error: err });
       this.enqueueChatTask(chatId, async () => {

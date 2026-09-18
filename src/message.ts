@@ -48,7 +48,11 @@ export function parseIncomingText(content: string): string {
 }
 
 export function sanitizeUserText(text: string): string {
-  return text.replace(/<at[^>]*>.*?<\/at>/g, "").trim();
+  return text
+    .replace(/<at[^>]*>.*?<\/at>/g, "")
+    .replace(/@_user_\d+/g, "")
+    .replace(/@_all/g, "")
+    .trim();
 }
 
 export function parseIncomingImageKey(content: string): string | null {

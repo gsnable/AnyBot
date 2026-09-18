@@ -258,9 +258,10 @@ export class QQBotChannel implements IChannel {
       return;
     }
 
+    const isGroup = eventType !== "C2C_MESSAGE_CREATE";
     let cmd;
     try {
-      cmd = await handleCommand(userText, chatId, "qqbot", this.callbacks!);
+      cmd = await handleCommand(userText, chatId, "qqbot", this.callbacks!, isGroup);
     } catch (err) {
       logger.error("qqbot.command_failed", { chatId, error: err });
       await this.sendText(chatId, message.id, "执行指令失败，请稍后再试。", eventType);

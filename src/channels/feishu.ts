@@ -248,7 +248,7 @@ export class FeishuChannel implements IChannel {
     }
 
     if (message.message_type === "text" || message.message_type === "post") {
-      void this.processTextMessage(client, config, message);
+      void this.processTextMessage(client, config, message, isGroup);
       return;
     }
   }
@@ -292,9 +292,18 @@ export class FeishuChannel implements IChannel {
       };
     }
 
+    const chatType =
+      event?.context?.chat_type ||
+      event?.chat_type ||
+      event?.event?.context?.chat_type;
+    const isGroup =
+      chatType === "group" ||
+      chatType === "group_chat" ||
+      (Boolean(this.config?.ownerChatId) && chatId !== this.config?.ownerChatId);
+
     let cmd;
     try {
-      cmd = await handleCommand(userText, chatId, "feishu", this.callbacks!);
+      cmd = await handleCommand(userText, chatId, "feishu", this.callbacks!, isGroup);
     } catch (err) {
       logger.error("feishu.card_action.command_failed", { chatId, error: err });
       return {
@@ -384,6 +393,7 @@ export class FeishuChannel implements IChannel {
     client: Lark.Client,
     config: FeishuChannelConfig,
     message: { message_id: string; chat_id: string; content: string },
+    isGroup: boolean = false,
   ): Promise<void> {
     const rawText = parseIncomingText(message.content);
     const userText = sanitizeUserText(rawText);
@@ -395,7 +405,7 @@ export class FeishuChannel implements IChannel {
 
     let cmd;
     try {
-      cmd = await handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
+      cmd = await handleCommand(userText, message.chat_id, "feishu", this.callbacks!, isGroup);
     } catch (err) {
       logger.error("feishu.text.command_failed", { chatId: message.chat_id, error: err });
       await sendText(client, message.chat_id, "执行指令失败，请稍后重试。", "系统提示");

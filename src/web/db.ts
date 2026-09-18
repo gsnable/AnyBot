@@ -135,7 +135,7 @@ const stmts = {
 
   listUserSessionsByChat: db.prepare(`
     SELECT id, title, updated_at AS updatedAt FROM sessions 
-    WHERE source = ? AND chat_id = ?
+    WHERE source = ? AND (chat_id = ? OR chat_id IS NULL)
     ORDER BY updated_at DESC LIMIT 10
   `),
 

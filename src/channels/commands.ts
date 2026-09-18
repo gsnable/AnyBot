@@ -14,6 +14,7 @@ export async function handleCommand(
   chatId: string,
   source: string,
   callbacks: ChannelCallbacks,
+  isGroup: boolean = false,
 ): Promise<CommandResult> {
   const trimmed = userText.trim();
 
@@ -21,14 +22,17 @@ export async function handleCommand(
   if (trimmed === "/new" || trimmed === "/reset" || trimmed === "/start") {
     await callbacks.stopSession(chatId);
     callbacks.resetSession(chatId, source);
+    const buttons = ["[BUTTON: /settings | ⚙️ 控制中心 | default]"];
+    if (!isGroup) {
+      buttons.push("[BUTTON: /chats | 📂 恢复历史会话 | default]");
+    }
     return {
       handled: true,
       title: "💬 会话重置",
       reply: [
         "✅ 会话已重置，之前的进程已停止，我们可以开始新对话了。",
         "",
-        "[BUTTON: /settings | ⚙️ 控制中心 | default]",
-        "[BUTTON: /chats | 📂 恢复历史会话 | default]",
+        buttons.join(" "),
       ].join("\n"),
     };
   }
@@ -57,6 +61,13 @@ export async function handleCommand(
 
   // 4. 列出历史会话（带一键切换按钮）
   if (trimmed === "/chats") {
+    if (isGroup) {
+      return {
+        handled: true,
+        title: "📂 历史会话",
+        reply: "⚠️ 群聊不支持调取历史会话，请在与王富贵的私聊窗口中使用 /chats 指令。",
+      };
+    }
     const sessions = await callbacks.listUserSessions(chatId, source);
     if (sessions.length === 0) {
       return {
@@ -90,6 +101,13 @@ export async function handleCommand(
 
   // 5. 切换历史会话
   if (trimmed.startsWith("/resume")) {
+    if (isGroup) {
+      return {
+        handled: true,
+        title: "🎬 切换会话",
+        reply: "⚠️ 群聊不支持切换历史会话，请在与王富贵的私聊窗口中使用此功能。",
+      };
+    }
     const parts = trimmed.split(/\s+/);
     if (parts.length < 2) {
       return {
@@ -144,7 +162,7 @@ export async function handleCommand(
 
   // 6. 帮助
   if (trimmed === "/help") {
-    return { handled: true, reply: formatHelp() };
+    return { handled: true, reply: formatHelp(isGroup) };
   }
 
   // 7. 供应商切换
@@ -338,6 +356,24 @@ export async function handleCommand(
 
   // 二级菜单 - 1. 会话管理（集成会话历史切换、任务控制与重置）
   if (trimmed === "/menu_session") {
+    if (isGroup) {
+      return {
+        handled: true,
+        replaceCurrent: true,
+        title: "💬 会话管理",
+        reply: [
+          "💬 **群聊会话与任务控制**",
+          "",
+          "⚡ **任务控制**：",
+          "[BUTTON: /retry | 🔄 重新生成上一条 | default] [BUTTON: /stop | ⏹️ 紧急停止 | default]",
+          "",
+          "⚠️ **重置操作**：",
+          "[BUTTON: /new | ➕ 重置群聊会话 | primary] [BUTTON: /reset | 🧹 清空本轮记忆 | danger]",
+          "",
+          "[BUTTON: /settings | 🔙 返回控制中心 | default]",
+        ].join("\n"),
+      };
+    }
     const sessions = await callbacks.listUserSessions(chatId, source);
     const lines = [
       "💬 **会话与进程控制**",
@@ -487,14 +523,28 @@ export async function handleCommand(
   return { handled: false };
 }
 
-function formatHelp(): string {
-  return [
+function formatHelp(isGroup: boolean = false): string {
+  const buttons = [
+    "[BUTTON: /settings | ⚙️ 呼出控制中心 | primary]",
+    "[BUTTON: /status | 📊 系统状态 | default]",
+  ];
+  if (!isGroup) {
+    buttons.push("[BUTTON: /chats | 📂 历史会话 | default]");
+  }
+
+  const lines = [
     "📋 **AnyBot 常用指令清单**：",
     "",
     "• `设置` 或 `/settings` — 呼出统一控制中心（三级下钻式动态菜单）",
-    "• `/new` — 开启新窗口（解绑当前会话）",
-    "• `/chats` — 调取最近历史会话（带一键切换按钮）",
-    "• `/resume <编号>` — 切回到指定历史会话",
+    "• `/new` — 开启新窗口（重置会话）",
+  ];
+
+  if (!isGroup) {
+    lines.push("• `/chats` — 调取最近历史会话（带一键切换按钮，私聊专享）");
+    lines.push("• `/resume <编号>` — 切回到指定历史会话（私聊专享）");
+  }
+
+  lines.push(
     "• `/status` — 查看系统与服务器运行状态",
     "• `/cwd` — 查看当前工作目录",
     "• `/cwd <路径>` — 切换工作目录",
@@ -505,10 +555,10 @@ function formatHelp(): string {
     "• `/model` — 查看与切换 AI 模型",
     "• `/help` — 显示此帮助信息",
     "",
-    "[BUTTON: /settings | ⚙️ 呼出控制中心 | primary]",
-    "[BUTTON: /status | 📊 系统状态 | default]",
-    "[BUTTON: /chats | 📂 历史会话 | default]",
-  ].join("\n");
+    buttons.join(" "),
+  );
+
+  return lines.join("\n");
 }
 
 function formatProviderList(callbacks: ChannelCallbacks): string {
