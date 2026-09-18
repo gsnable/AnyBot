@@ -19,6 +19,8 @@ export class QQBotChannel implements IChannel {
   private lastSeq: number | null = null;
   private accessToken: string | null = null;
   private tokenExpiresAt: number = 0;
+  private isStopping = false;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
 
   async start(callbacks: ChannelCallbacks): Promise<void> {
     const config = readChannelConfig<QQBotChannelConfig>("qqbot");
@@ -33,15 +35,22 @@ export class QQBotChannel implements IChannel {
 
     this.config = config;
     this.callbacks = callbacks;
+    this.isStopping = false;
     
     try {
       await this.connect();
     } catch (e) {
       logger.error("qqbot.start_failed", { error: e });
+      throw e;
     }
   }
 
   async stop(): Promise<void> {
+    this.isStopping = true;
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
@@ -163,7 +172,16 @@ export class QQBotChannel implements IChannel {
         clearInterval(this.heartbeatInterval);
         this.heartbeatInterval = null;
       }
-      // TODO: 添加断线重连逻辑
+      if (!this.isStopping && this.config && this.config.enabled) {
+        logger.info("qqbot.reconnecting_in_5s");
+        this.reconnectTimeout = setTimeout(() => {
+          if (!this.isStopping && this.config && this.config.enabled) {
+            this.connect().catch((err) => {
+              logger.error("qqbot.reconnect_failed", { error: err });
+            });
+          }
+        }, 5000);
+      }
     });
     
     this.ws.on("error", (error: Error) => {
@@ -240,7 +258,14 @@ export class QQBotChannel implements IChannel {
       return;
     }
 
-    const cmd = await handleCommand(userText, chatId, "qqbot", this.callbacks!);
+    let cmd;
+    try {
+      cmd = await handleCommand(userText, chatId, "qqbot", this.callbacks!);
+    } catch (err) {
+      logger.error("qqbot.command_failed", { chatId, error: err });
+      await this.sendText(chatId, message.id, "执行指令失败，请稍后再试。", eventType);
+      return;
+    }
     if (cmd.handled) {
       if (cmd.reply) await this.sendText(chatId, message.id, cmd.reply, eventType);
       return;

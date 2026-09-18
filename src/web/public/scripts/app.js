@@ -325,7 +325,8 @@
                 var content = document.createElement('div');
                 content.className = 'message-content';
                 try {
-                    content.innerHTML = marked.parse(text);
+                    var parsed = marked.parse(text);
+                    content.innerHTML = (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(parsed) : parsed;
                 } catch (e) {
                     content.textContent = text;
                 }

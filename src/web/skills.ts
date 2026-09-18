@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { getProvider } from "../providers/index.js";
+import { getDataDir } from "../shared.js";
 
 export interface SkillInfo {
   id: string;
@@ -58,7 +59,7 @@ function getSkillSources(): SkillSource[] {
 }
 
 function getDisabledSkillsPath(): string {
-  const dataDir = process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.join(process.cwd(), ".data");
+  const dataDir = getDataDir();
   fs.mkdirSync(dataDir, { recursive: true });
   return path.join(dataDir, "disabled-skills.json");
 }
@@ -176,27 +177,40 @@ export function deleteSkill(id: string): { ok: boolean; error?: string } {
 }
 
 function openDirectory(dir: string): void {
-  const platform = os.platform();
-  let cmd: string;
-  if (platform === "darwin") {
-    cmd = `open "${dir}"`;
-  } else if (platform === "win32") {
-    cmd = `explorer "${dir}"`;
-  } else {
-    cmd = `nautilus "${dir}" 2>/dev/null || thunar "${dir}" 2>/dev/null || dolphin "${dir}" 2>/dev/null || xdg-open "${dir}"`;
-  }
-  exec(cmd, () => {});
+  try {
+    const resolved = path.resolve(dir);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      return;
+    }
+    const platform = os.platform();
+    if (platform === "darwin") {
+      spawn("open", [resolved], { stdio: "ignore", detached: true });
+    } else if (platform === "win32") {
+      spawn("explorer", [resolved], { stdio: "ignore", detached: true });
+    } else {
+      // Linux: try xdg-open directly with arguments
+      const child = spawn("xdg-open", [resolved], { stdio: "ignore", detached: true });
+      child.on("error", () => {});
+    }
+  } catch {}
 }
 
 export function openSkillsFolder(skillPath?: string): void {
+  const sources = getSkillSources();
   if (skillPath) {
-    openDirectory(path.dirname(skillPath));
+    const resolved = path.resolve(skillPath);
+    const targetDir = path.dirname(resolved);
+    // 校验目标必须属于某个已注册的技能源目录，防止任意路径打开
+    const isAllowed = sources.some(s => resolved.startsWith(path.resolve(s.dir)));
+    if (isAllowed && fs.existsSync(targetDir)) {
+      openDirectory(targetDir);
+    }
     return;
   }
 
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   const defaultDir = path.join(codexHome, "skills");
-  const baseDir = getSkillSources()[0]?.dir || defaultDir;
+  const baseDir = sources[0]?.dir || defaultDir;
   const dirs = new Set<string>();
 
   try {

@@ -6,6 +6,18 @@ import path from "node:path";
 import { applyProxy } from "./proxy.js";
 import { createApp } from "./web/server.js";
 
+process.on("unhandledRejection", (reason) => {
+  logger.error("process.unhandled_rejection", {
+    reason: reason instanceof Error ? reason.stack || reason.message : String(reason),
+  });
+});
+
+process.on("uncaughtException", (error) => {
+  logger.error("process.uncaught_exception", {
+    error: error.stack || error.message,
+  });
+});
+
 import {
   initProvider,
   getProvider,
@@ -133,18 +145,18 @@ function resetChatSession(chatId: string, source?: string): void {
 
 export function formatProviderError(error: unknown): string {
   if (error instanceof ProviderTimeoutError) {
-    return "处理超时了，可能是问题太复杂。试试简化一下？";
+    return "处理超时了，可能是问题太复杂。试试简化一下？\n\n[BUTTON: /retry | 🔄 重新生成上一条 | primary]";
   }
   if (error instanceof ProviderProcessError) {
-    return "内部处理出错了，请稍后再试。";
+    return "内部处理出错了，请稍后再试。\n\n[BUTTON: /retry | 🔄 重新生成上一条 | primary]";
   }
   if (error instanceof ProviderEmptyOutputError) {
-    return "没有生成有效回复，请换个方式描述试试。";
+    return "⚠️ 本轮后台任务执行耗时过长或未输出文字总结。建议发送 /retry 重新生成，或简化一下提问。\n\n[BUTTON: /retry | 🔄 重新生成上一条 | primary]";
   }
   if (error instanceof Error) {
-    return `处理消息时出错了: ${error.message}`;
+    return `处理消息时出错了: ${error.message}\n\n[BUTTON: /retry | 🔄 重新生成上一条 | primary]`;
   }
-  return "处理消息时出错了，原因未知。";
+  return "处理消息时出错了，原因未知。\n\n[BUTTON: /retry | 🔄 重新生成上一条 | primary]";
 }
 
 function getOrCreateChannelSession(source: string, chatId: string): db.ChatSession {
@@ -471,10 +483,11 @@ async function main(): Promise<void> {
     webPort: WEB_PORT,
   });
 
+  const WEB_HOST = process.env.WEB_HOST || "127.0.0.1";
   const webApp = createApp();
-  webApp.listen(WEB_PORT, () => {
-    logger.info("web.started", { port: WEB_PORT });
-    console.log(`AnyBot Web UI: http://localhost:${WEB_PORT}`);
+  webApp.listen(WEB_PORT, WEB_HOST, () => {
+    logger.info("web.started", { host: WEB_HOST, port: WEB_PORT });
+    console.log(`AnyBot Web UI: http://${WEB_HOST}:${WEB_PORT}`);
   });
 
   const channels = await startAllChannels(channelCallbacks);

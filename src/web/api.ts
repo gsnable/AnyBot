@@ -60,8 +60,45 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB 上限
 
+function maskSecret(val?: string): string {
+  if (!val) return "";
+  if (val.length <= 8) return "********";
+  return val.slice(0, 3) + "********" + val.slice(-3);
+}
+
+function sanitizeChannelConfig(cfg: any): any {
+  const cloned = JSON.parse(JSON.stringify(cfg));
+  for (const key of Object.keys(cloned)) {
+    const ch = cloned[key];
+    if (ch && typeof ch === "object") {
+      if (ch.appSecret) ch.appSecret = maskSecret(ch.appSecret);
+      if (ch.token) ch.token = maskSecret(ch.token);
+    }
+  }
+  return cloned;
+}
+
 export function chatRouter(): Router {
   const router = Router();
+
+  // 可选 Token 鉴权中间件
+  router.use((req: Request, res: Response, next) => {
+    const requiredToken = process.env.WEB_TOKEN;
+    if (!requiredToken) {
+      return next();
+    }
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    const customHeader = req.headers["x-anybot-token"] as string | undefined;
+    const queryToken = req.query.token as string | undefined;
+
+    const provided = bearerToken || customHeader || queryToken;
+    if (!provided || provided !== requiredToken) {
+      res.status(401).json({ error: "未授权：无效或缺失 WEB_TOKEN" });
+      return;
+    }
+    next();
+  });
 
   router.get("/sessions", (_req: Request, res: Response) => {
     const list = db.listSessions();
@@ -162,7 +199,7 @@ export function chatRouter(): Router {
     try {
       const config = readChannelsConfig();
       const registered = getRegisteredChannelTypes();
-      res.json({ registered, config });
+      res.json({ registered, config: sanitizeChannelConfig(config) });
     } catch (error) {
       res.status(500).json({ error: "读取频道配置失败" });
     }
@@ -176,9 +213,19 @@ export function chatRouter(): Router {
       return;
     }
     try {
-      const config = updateChannelConfig(channelType, req.body);
+      const existing = (readChannelsConfig() as Record<string, any>)[channelType] || {};
+      const updates = { ...req.body };
+      // 如果前端回传的是掩码占位符或空，保留原有已存储密钥
+      if (typeof updates.appSecret === "string" && (updates.appSecret.includes("********") || !updates.appSecret.trim())) {
+        updates.appSecret = existing.appSecret;
+      }
+      if (typeof updates.token === "string" && (updates.token.includes("********") || !updates.token.trim())) {
+        updates.token = existing.token;
+      }
+
+      const config = updateChannelConfig(channelType, updates);
       logger.info("channel.config.updated", { channelType });
-      res.json(config);
+      res.json(sanitizeChannelConfig(config));
 
       channelManager.restartChannel(channelType).catch((error) => {
         logger.error("channel.restart_after_save_failed", { channelType, error });
@@ -386,10 +433,31 @@ export function chatRouter(): Router {
       return;
     }
     const resolved = path.resolve(filePath);
+    
+    // 安全边界校验：必须落在允许的目录白名单内，防止任意文件读取
+    const allowedRoots = [
+      UPLOAD_DIR,
+      path.resolve(getDataDir(), "media"),
+      path.resolve(process.cwd(), "assets"),
+      path.resolve(getWorkdir()),
+    ];
+    const isAllowed = allowedRoots.some((root) => resolved.startsWith(root + path.sep) || resolved === root);
+    if (!isAllowed) {
+      res.status(403).json({ error: "禁止越权访问受限目录外的文件" });
+      return;
+    }
+
     if (!fs.existsSync(resolved)) {
       res.status(404).json({ error: "文件不存在" });
       return;
     }
+
+    if (path.extname(resolved).toLowerCase() === ".svg") {
+      res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.type("image/svg+xml");
+    }
+
     res.sendFile(resolved);
   });
 

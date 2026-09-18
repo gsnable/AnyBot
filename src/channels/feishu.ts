@@ -94,16 +94,22 @@ export class FeishuChannel implements IChannel {
     }
 
     this.config = config;
-    this.callbacks = callbacks;
     this.startedAtMs = Date.now();
 
-    // 重新包装回调：注入飞书特有的进度发送逻辑
+    // 重新包装回调：注入飞书特有的进度发送逻辑（构建新对象，不污染全局 callbacks）
     const originalSendProgress = callbacks.sendProgress;
-    callbacks.sendProgress = async (chatId, text) => {
-      if (this.larkClient) {
-        await sendText(this.larkClient, chatId, text, "系统提示");
-      }
-      if (originalSendProgress) await originalSendProgress(chatId, text);
+    this.callbacks = {
+      ...callbacks,
+      sendProgress: async (chatId, text) => {
+        if (this.larkClient) {
+          try {
+            await sendText(this.larkClient, chatId, text, "系统提示");
+          } catch (error) {
+            logger.warn("feishu.send_progress_failed", { chatId, error });
+          }
+        }
+        if (originalSendProgress) await originalSendProgress(chatId, text);
+      },
     };
 
     const { client, wsClient, EventDispatcher } = createLarkClients(
@@ -138,6 +144,13 @@ export class FeishuChannel implements IChannel {
 
   async stop(): Promise<void> {
     if (this.wsClient) {
+      try {
+        if (typeof (this.wsClient as any).close === "function") {
+          (this.wsClient as any).close();
+        }
+      } catch (error) {
+        logger.warn("feishu.ws_close_failed", { error });
+      }
       this.wsClient = null;
     }
     this.larkClient = null;
@@ -279,7 +292,18 @@ export class FeishuChannel implements IChannel {
       };
     }
 
-    const cmd = await handleCommand(userText, chatId, "feishu", this.callbacks!);
+    let cmd;
+    try {
+      cmd = await handleCommand(userText, chatId, "feishu", this.callbacks!);
+    } catch (err) {
+      logger.error("feishu.card_action.command_failed", { chatId, error: err });
+      return {
+        toast: {
+          type: "error",
+          content: "执行指令失败，请稍后重试",
+        },
+      };
+    }
     if (cmd.handled) {
       if (cmd.reply) {
         if (cmd.replaceCurrent && messageId) {
@@ -369,7 +393,14 @@ export class FeishuChannel implements IChannel {
       return;
     }
 
-    const cmd = await handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
+    let cmd;
+    try {
+      cmd = await handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
+    } catch (err) {
+      logger.error("feishu.text.command_failed", { chatId: message.chat_id, error: err });
+      await sendText(client, message.chat_id, "执行指令失败，请稍后重试。", "系统提示");
+      return;
+    }
     if (cmd.handled) {
       if (cmd.reply) await sendText(client, message.chat_id, cmd.reply, "系统提示");
       return;

@@ -241,9 +241,16 @@ export class TelegramChannel implements IChannel {
     const rawText = this.stripBotMention(message.text);
     const userText = sanitizeUserText(rawText);
 
-    if (!userText) return;
-
-    const cmd = await handleCommand(userText, chatId, "telegram", this.callbacks!);
+    let cmd;
+    try {
+      cmd = await handleCommand(userText, chatId, "telegram", this.callbacks!);
+    } catch (err) {
+      logger.error("telegram.command_failed", { chatId, error: err });
+      this.enqueueChatTask(chatId, async () => {
+        await this.sendReply(chatId, "执行指令失败，请稍后再试。");
+      });
+      return;
+    }
     if (cmd.handled) {
       this.enqueueChatTask(chatId, async () => {
         if (cmd.reply) await this.sendReply(chatId, cmd.reply);
